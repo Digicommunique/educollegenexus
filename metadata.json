@@ -1,0 +1,5 @@
+{
+  "name": "EduNexus by DCgive",
+  "description": "A comprehensive College ERP for managing admissions, academics, exams, fees, and multi-user collaboration.",
+  "requestFramePermissions": ["camera", "microphone", "geolocation"]
+}
