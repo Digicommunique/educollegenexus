@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Users, 
   Search, 
@@ -11,39 +11,215 @@ import {
   ChevronRight,
   UserCheck,
   Calendar,
-  FileText
+  FileText,
+  Scan,
+  Settings as SettingsIcon,
+  History,
+  QrCode,
+  Camera,
+  Globe,
+  MapPin,
+  MoreVertical,
+  User
 } from 'lucide-react';
 import { cn, formatDate } from '../../lib/utils';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { exportToPDF, exportToExcel } from '../../lib/exportUtils';
+import { AttendanceScanner } from './AttendanceScanner';
+import { AttendanceSettings } from './AttendanceSettings';
+import { supabase } from '../../lib/supabase';
 
-const STUDENTS = [
-  { id: 'S001', name: 'Rahul Sharma', roll: 'CS202601', attendance: 92, status: 'PRESENT' },
-  { id: 'S002', name: 'Priya Patel', roll: 'CS202602', attendance: 85, status: 'PRESENT' },
-  { id: 'S003', name: 'Amit Kumar', roll: 'CS202603', attendance: 78, status: 'ABSENT' },
-  { id: 'S004', name: 'Siddharth Singh', roll: 'CS202604', attendance: 95, status: 'PRESENT' },
-  { id: 'S005', name: 'Anjali Verma', roll: 'CS202605', attendance: 65, status: 'ABSENT' },
-  { id: 'S006', name: 'Vikram Malhotra', roll: 'CS202606', attendance: 88, status: 'LATE' },
-  { id: 'S007', name: 'Meera Iyer', roll: 'CS202607', attendance: 91, status: 'PRESENT' },
-  { id: 'S008', name: 'Sanjay Gupta', roll: 'CS202608', attendance: 82, status: 'PRESENT' },
-];
+interface AttendanceRecord {
+  id: string;
+  student_id: string;
+  name: string;
+  roll: string;
+  status: 'PRESENT' | 'ABSENT' | 'LATE';
+  time?: string;
+  ip?: string;
+  location?: string;
+  method?: string;
+  course: string;
+  year: string;
+  branch: string;
+  section: string;
+  subject?: string;
+}
 
 export const Attendance: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [attendanceData, setAttendanceData] = useState(STUDENTS);
+  const [filters, setFilters] = useState({
+    course: 'All',
+    year: 'All',
+    branch: 'All',
+    section: 'All',
+    search: ''
+  });
+  const [students, setStudents] = useState<any[]>([]);
+  const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showScanner, setShowScanner] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState(() => {
+    const saved = localStorage.getItem('attendance_settings');
+    return saved ? JSON.parse(saved) : {
+      startTime: '09:00',
+      lateThreshold: '09:15',
+      absentThreshold: '09:45'
+    };
+  });
 
-  const toggleStatus = (id: string, status: string) => {
-    setAttendanceData(prev => prev.map(s => s.id === id ? { ...s, status } : s));
+  useEffect(() => {
+    fetchData();
+  }, [selectedDate, filters.course, filters.branch, filters.year, filters.section]);
+
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      // Fetch students based on filters
+      let studentQuery = supabase.from('students').select('*');
+      if (filters.course !== 'All') studentQuery = studentQuery.eq('branch', filters.course); // Map branch to course for now or use course field if added
+      if (filters.branch !== 'All') studentQuery = studentQuery.eq('branch', filters.branch);
+      if (filters.year !== 'All') studentQuery = studentQuery.eq('year', filters.year);
+      if (filters.section !== 'All') studentQuery = studentQuery.eq('section', filters.section);
+
+      const { data: studentList, error: studentError } = await studentQuery;
+      if (studentError) throw studentError;
+
+      // Fetch attendance for the selected date
+      const { data: attendanceList, error: attendanceError } = await supabase
+        .from('attendance')
+        .select('*')
+        .eq('date', selectedDate);
+      if (attendanceError) throw attendanceError;
+
+      const mergedData = (studentList || []).map(student => {
+        const record = (attendanceList || []).find(a => a.student_id === student.id);
+        return {
+          id: record?.id || `temp-${student.id}`,
+          student_id: student.id,
+          name: student.name,
+          roll: student.roll_no || 'N/A',
+          status: (record?.status?.toUpperCase() || 'ABSENT') as 'PRESENT' | 'ABSENT' | 'LATE',
+          time: record?.time,
+          ip: record?.ip_address,
+          location: record?.location,
+          method: record?.method,
+          course: student.branch || 'B.Tech',
+          year: student.year || '1st Year',
+          branch: student.branch || 'CS',
+          section: student.section || 'A'
+        };
+      });
+
+      setStudents(studentList || []);
+      setAttendanceData(mergedData);
+    } catch (error) {
+      console.error('Error fetching attendance data:', error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
+  useEffect(() => {
+    localStorage.setItem('attendance_settings', JSON.stringify(settings));
+  }, [settings]);
+
+  const handleStatusChange = async (studentId: string, status: 'PRESENT' | 'ABSENT' | 'LATE') => {
+    try {
+      const existingRecord = attendanceData.find(a => a.student_id === studentId && !a.id.startsWith('temp-'));
+      const student = students.find(s => s.id === studentId);
+
+      const recordData = {
+        student_id: studentId,
+        date: selectedDate,
+        status: status.charAt(0) + status.slice(1).toLowerCase(),
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        method: 'MANUAL',
+        course: student?.branch,
+        branch: student?.branch,
+        year: student?.year,
+        section: student?.section
+      };
+
+      if (existingRecord) {
+        const { error } = await supabase
+          .from('attendance')
+          .update(recordData)
+          .eq('id', existingRecord.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('attendance')
+          .insert([recordData]);
+        if (error) throw error;
+      }
+
+      fetchData();
+    } catch (error) {
+      console.error('Error updating attendance:', error);
+    }
+  };
+
+  const handleScanSuccess = async (record: any) => {
+    try {
+      const student = students.find(s => s.id === record.studentId || s.name === record.studentName);
+      if (!student) return;
+
+      const recordData = {
+        student_id: student.id,
+        date: selectedDate,
+        status: record.status.charAt(0) + record.status.slice(1).toLowerCase(),
+        time: record.time,
+        method: record.method,
+        ip_address: record.ip,
+        location: record.location,
+        course: student.branch,
+        branch: student.branch,
+        year: student.year,
+        section: student.section
+      };
+
+      const { error } = await supabase
+        .from('attendance')
+        .upsert([recordData], { onConflict: 'student_id,date' }); // Note: Need unique constraint on student_id, date for upsert
+      
+      if (error) {
+        // Fallback if no unique constraint
+        const { data: existing } = await supabase
+          .from('attendance')
+          .select('id')
+          .eq('student_id', student.id)
+          .eq('date', selectedDate)
+          .single();
+        
+        if (existing) {
+          await supabase.from('attendance').update(recordData).eq('id', existing.id);
+        } else {
+          await supabase.from('attendance').insert([recordData]);
+        }
+      }
+
+      fetchData();
+    } catch (error) {
+      console.error('Error saving scanned attendance:', error);
+    }
+  };
+
+  const filteredData = attendanceData.filter(student => {
+    const matchesSearch = student.name.toLowerCase().includes(filters.search.toLowerCase()) || 
+                         student.roll.toLowerCase().includes(filters.search.toLowerCase());
+    return matchesSearch;
+  });
+
   const handleExportPDF = () => {
-    const headers = ['ID', 'Name', 'Roll No', 'Attendance %', 'Status'];
-    const data = attendanceData.map(s => [s.id, s.name, s.roll, `${s.attendance}%`, s.status]);
-    exportToPDF('Attendance Report', headers, data, `Attendance_${selectedDate}`);
+    const headers = ['ID', 'Name', 'Roll No', 'Course', 'Year', 'Branch', 'Section', 'Status', 'Time', 'Method'];
+    const data = filteredData.map(s => [s.id, s.name, s.roll, s.course, s.year, s.branch, s.section, s.status, s.time || '-', s.method || '-']);
+    exportToPDF('Attendance Report', headers, data, `Attendance_${selectedDate}_${filters.course}_${filters.branch}`);
   };
 
   const handleExportExcel = () => {
-    exportToExcel(attendanceData, `Attendance_${selectedDate}`);
+    exportToExcel(filteredData, `Attendance_${selectedDate}_${filters.course}_${filters.branch}`);
   };
 
   return (
@@ -57,67 +233,130 @@ export const Attendance: React.FC = () => {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <button 
+              onClick={() => setShowSettings(!showSettings)}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 border rounded-xl text-sm font-bold transition-all shadow-sm",
+                showSettings ? "bg-indigo-600 text-white border-indigo-600" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              <SettingsIcon className="w-4 h-4" />
+              Settings
+            </button>
+            <button 
+              onClick={() => setShowScanner(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-500/20"
+            >
+              <Scan className="w-4 h-4" />
+              Scan Attendance
+            </button>
+          </div>
+          <div className="flex items-center gap-2 border-l border-slate-200 pl-3">
+            <button 
               onClick={handleExportPDF}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-primary/10 text-slate-600 rounded-xl text-sm font-bold hover:bg-background transition-colors shadow-sm"
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50 transition-colors shadow-sm"
             >
               <FileText className="w-4 h-4" />
               PDF
             </button>
-            <button 
-              onClick={handleExportExcel}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-primary/10 text-slate-600 rounded-xl text-sm font-bold hover:bg-background transition-colors shadow-sm"
-            >
-              <Download className="w-4 h-4" />
-              Excel
-            </button>
           </div>
-          <button className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-bold hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20">
-            <CheckCircle2 className="w-4 h-4" />
-            Submit Attendance
-          </button>
         </div>
       </div>
 
+      <AnimatePresence>
+        {showSettings && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <AttendanceSettings 
+              settings={settings} 
+              onSave={(newSettings) => { setSettings(newSettings); setShowSettings(false); }} 
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Filters & Search */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="md:col-span-1">
-          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Select Date</label>
-          <div className="relative">
-            <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input 
-              type="date" 
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-            />
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div>
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Select Date</label>
+            <div className="relative">
+              <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input 
+                type="date" 
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Course</label>
+            <select 
+              value={filters.course}
+              onChange={(e) => setFilters({...filters, course: e.target.value})}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+            >
+              <option value="All">All Courses</option>
+              <option value="B.Tech">B.Tech</option>
+              <option value="M.Tech">M.Tech</option>
+              <option value="BCA">BCA</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Year</label>
+            <select 
+              value={filters.year}
+              onChange={(e) => setFilters({...filters, year: e.target.value})}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+            >
+              <option value="All">All Years</option>
+              <option value="1st Year">1st Year</option>
+              <option value="2nd Year">2nd Year</option>
+              <option value="3rd Year">3rd Year</option>
+              <option value="4th Year">4th Year</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Branch</label>
+            <select 
+              value={filters.branch}
+              onChange={(e) => setFilters({...filters, branch: e.target.value})}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+            >
+              <option value="All">All Branches</option>
+              <option value="CS">Computer Science</option>
+              <option value="IT">Information Tech</option>
+              <option value="ME">Mechanical</option>
+              <option value="EE">Electrical</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Section</label>
+            <select 
+              value={filters.section}
+              onChange={(e) => setFilters({...filters, section: e.target.value})}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+            >
+              <option value="All">All Sections</option>
+              <option value="A">Section A</option>
+              <option value="B">Section B</option>
+              <option value="C">Section C</option>
+            </select>
           </div>
         </div>
-        <div className="md:col-span-1">
-          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Course</label>
-          <select className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
-            <option>B.Tech CS - Sem 4</option>
-            <option>B.Tech IT - Sem 4</option>
-            <option>B.Tech ME - Sem 4</option>
-          </select>
-        </div>
-        <div className="md:col-span-1">
-          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Subject</label>
-          <select className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
-            <option>Data Structures</option>
-            <option>Algorithms</option>
-            <option>Database Systems</option>
-          </select>
-        </div>
-        <div className="md:col-span-1">
-          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Search Student</label>
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input 
-              type="text" 
-              placeholder="Name or Roll No..."
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-            />
-          </div>
+        <div className="relative">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input 
+            type="text" 
+            placeholder="Search by Name or Roll Number..."
+            value={filters.search}
+            onChange={(e) => setFilters({...filters, search: e.target.value})}
+            className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+          />
         </div>
       </div>
 
@@ -129,7 +368,7 @@ export const Attendance: React.FC = () => {
           </div>
           <div>
             <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Present</p>
-            <p className="text-2xl font-bold text-slate-900">{attendanceData.filter(s => s.status === 'PRESENT').length}</p>
+            <p className="text-2xl font-bold text-slate-900">{filteredData.filter(s => s.status === 'PRESENT').length}</p>
           </div>
         </div>
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
@@ -138,7 +377,7 @@ export const Attendance: React.FC = () => {
           </div>
           <div>
             <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Absent</p>
-            <p className="text-2xl font-bold text-slate-900">{attendanceData.filter(s => s.status === 'ABSENT').length}</p>
+            <p className="text-2xl font-bold text-slate-900">{filteredData.filter(s => s.status === 'ABSENT').length}</p>
           </div>
         </div>
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
@@ -147,108 +386,128 @@ export const Attendance: React.FC = () => {
           </div>
           <div>
             <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Late</p>
-            <p className="text-2xl font-bold text-slate-900">{attendanceData.filter(s => s.status === 'LATE').length}</p>
+            <p className="text-2xl font-bold text-slate-900">{filteredData.filter(s => s.status === 'LATE').length}</p>
           </div>
         </div>
       </div>
 
-      {/* Student List */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* Attendance Table & Detailed Report */}
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <History className="w-5 h-5 text-indigo-600" />
+            <h3 className="font-black text-slate-800">Attendance Log & Report</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase">Auto-Refresh: ON</span>
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Student</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Roll Number</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Overall Attendance</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Status</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Time & Method</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Network & Location</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {attendanceData.map((student, i) => (
+              {filteredData.map((student, i) => (
                 <motion.tr 
                   key={student.id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05 }}
-                  className="hover:bg-slate-50/50 transition-colors"
+                  className="hover:bg-slate-50/50 transition-colors group"
                 >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold">
-                        {student.name.charAt(0)}
+                      <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500 font-bold">
+                        {student.name.split(' ').map(n => n[0]).join('')}
                       </div>
                       <div>
                         <p className="text-sm font-bold text-slate-800">{student.name}</p>
-                        <p className="text-xs text-slate-400">{student.id}</p>
+                        <p className="text-xs text-slate-400">{student.roll} • {student.course} {student.branch}</p>
                       </div>
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="text-sm font-medium text-slate-600">{student.roll}</span>
+                    <div className="flex gap-1">
+                      <button 
+                        onClick={() => handleStatusChange(student.id, 'PRESENT')}
+                        className={cn(
+                          "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all",
+                          student.status === 'PRESENT' ? "bg-green-100 text-green-600 shadow-sm" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                        )}
+                      >
+                        Present
+                      </button>
+                      <button 
+                        onClick={() => handleStatusChange(student.id, 'LATE')}
+                        className={cn(
+                          "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all",
+                          student.status === 'LATE' ? "bg-amber-100 text-amber-600 shadow-sm" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                        )}
+                      >
+                        Late
+                      </button>
+                      <button 
+                        onClick={() => handleStatusChange(student.id, 'ABSENT')}
+                        className={cn(
+                          "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all",
+                          student.status === 'ABSENT' ? "bg-red-100 text-red-600 shadow-sm" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                        )}
+                      >
+                        Absent
+                      </button>
+                    </div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden max-w-[100px]">
-                        <div 
-                          className={cn(
-                            "h-full rounded-full transition-all duration-1000",
-                            student.attendance > 85 ? "bg-green-500" : student.attendance > 75 ? "bg-amber-500" : "bg-red-500"
-                          )}
-                          style={{ width: `${student.attendance}%` }}
-                        />
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                        <Clock className="w-3 h-3 text-slate-400" />
+                        {student.time || '--:--'}
                       </div>
-                      <span className="text-sm font-bold text-slate-700">{student.attendance}%</span>
+                      <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase">
+                        {student.method === 'QR' ? <QrCode className="w-3 h-3" /> : student.method === 'FACE' ? <Camera className="w-3 h-3" /> : <User className="w-3 h-3" />}
+                        {student.method || 'MANUAL'}
+                      </div>
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center justify-center gap-2">
-                      <button 
-                        onClick={() => toggleStatus(student.id, 'PRESENT')}
-                        className={cn(
-                          "w-10 h-10 rounded-xl flex items-center justify-center transition-all",
-                          student.status === 'PRESENT' ? "bg-green-600 text-white shadow-lg shadow-green-100" : "bg-slate-100 text-slate-400 hover:bg-green-50 hover:text-green-600"
-                        )}
-                      >
-                        <CheckCircle2 className="w-5 h-5" />
-                      </button>
-                      <button 
-                        onClick={() => toggleStatus(student.id, 'ABSENT')}
-                        className={cn(
-                          "w-10 h-10 rounded-xl flex items-center justify-center transition-all",
-                          student.status === 'ABSENT' ? "bg-red-600 text-white shadow-lg shadow-red-100" : "bg-slate-100 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                        )}
-                      >
-                        <XCircle className="w-5 h-5" />
-                      </button>
-                      <button 
-                        onClick={() => toggleStatus(student.id, 'LATE')}
-                        className={cn(
-                          "w-10 h-10 rounded-xl flex items-center justify-center transition-all",
-                          student.status === 'LATE' ? "bg-amber-500 text-white shadow-lg shadow-amber-100" : "bg-slate-100 text-slate-400 hover:bg-amber-50 hover:text-amber-500"
-                        )}
-                      >
-                        <Clock className="w-5 h-5" />
-                      </button>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500">
+                        <Globe className="w-3 h-3 text-indigo-400" />
+                        {student.ip || '0.0.0.0'}
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400">
+                        <MapPin className="w-3 h-3 text-rose-400" />
+                        <span className="truncate max-w-[120px]">{student.location || 'Unknown'}</span>
+                      </div>
                     </div>
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <button className="p-2 hover:bg-slate-100 rounded-lg transition-colors text-slate-400 hover:text-slate-600">
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
                   </td>
                 </motion.tr>
               ))}
             </tbody>
           </table>
         </div>
-        <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
-          <p className="text-sm text-slate-500">Showing 1 to 8 of 45 students</p>
-          <div className="flex items-center gap-2">
-            <button className="p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-indigo-600 disabled:opacity-50" disabled>
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <button className="p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-indigo-600">
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
       </div>
+
+      {showScanner && (
+        <AttendanceScanner 
+          settings={settings}
+          onClose={() => setShowScanner(false)}
+          onScanSuccess={handleScanSuccess}
+        />
+      )}
     </div>
   );
 };

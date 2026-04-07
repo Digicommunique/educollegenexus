@@ -26,49 +26,158 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { exportToPDF, exportToExcel } from '../../lib/exportUtils';
+import { supabase } from '../../lib/supabase';
 
 interface Student {
   id: string;
+  rollNumber: string;
+  title?: string;
+  firstName?: string;
+  middleName?: string;
+  surname?: string;
   name: string;
   email: string;
   phone: string;
   branch: string;
   batch: string;
   year: string;
+  bloodGroup?: string;
+  religion?: string;
+  caste?: string;
+  category?: string;
+  address?: string;
+  state?: string;
+  pincode?: string;
+  fatherName?: string;
+  fatherOccupation?: string;
+  motherName?: string;
+  motherOccupation?: string;
+  parentPhone?: string;
+  parentEmail?: string;
+  emergencyName?: string;
+  emergencyPhone?: string;
+  emergencyAddress?: string;
+  allergy?: string;
   status: 'Active' | 'Inactive';
 }
 
 export const Students: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
+  const [courses, setCourses] = useState<any[]>([]);
   const [view, setView] = useState<'list' | 'register'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [academicSettings, setAcademicSettings] = useState<any>({
+    castes: ['General', 'OBC', 'SC', 'ST', 'EWS'],
+    religions: ['Hinduism', 'Islam', 'Christianity', 'Sikhism', 'Buddhism', 'Jainism'],
+    branches: ['Computer Science', 'Information Technology', 'Mechanical', 'Civil', 'Electronics'],
+    batches: ['2024-28', '2023-27', '2022-26'],
+    sessions: ['2023-24', '2024-25', '2025-26']
+  });
+
+  const indianStates = [
+    'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat', 
+    'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 
+    'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab', 
+    'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 
+    'Uttarakhand', 'West Bengal', 'Andaman and Nicobar Islands', 'Chandigarh', 
+    'Dadra and Nagar Haveli and Daman and Diu', 'Delhi', 'Jammu and Kashmir', 'Ladakh', 
+    'Lakshadweep', 'Puducherry'
+  ];
 
   useEffect(() => {
-    const saved = localStorage.getItem('edunexus_students');
-    if (saved) {
-      setStudents(JSON.parse(saved));
-    } else {
-      const initial = [
-        { id: 'STU2024001', name: 'Rahul Sharma', email: 'rahul.s@example.com', phone: '+91 98765 43210', branch: 'Computer Science', batch: '2024-28', year: '1st Year', status: 'Active' },
-        { id: 'STU2024002', name: 'Priya Patel', email: 'priya.p@example.com', phone: '+91 98765 43211', branch: 'Information Technology', batch: '2024-28', year: '1st Year', status: 'Active' },
-        { id: 'STU2023045', name: 'Amit Kumar', email: 'amit.k@example.com', phone: '+91 98765 43212', branch: 'Mechanical Engineering', batch: '2023-27', year: '2nd Year', status: 'Active' },
-        { id: 'STU2023046', name: 'Siddharth Singh', email: 'siddharth.s@example.com', phone: '+91 98765 43213', branch: 'Computer Science', batch: '2023-27', year: '2nd Year', status: 'Active' },
-        { id: 'STU2022089', name: 'Anjali Verma', email: 'anjali.v@example.com', phone: '+91 98765 43214', branch: 'Civil Engineering', batch: '2022-26', year: '3rd Year', status: 'Active' },
-        { id: 'STU2022090', name: 'Vikram Malhotra', email: 'vikram.m@example.com', phone: '+91 98765 43215', branch: 'Information Technology', batch: '2022-26', year: '3rd Year', status: 'Active' },
-        { id: 'STU2021123', name: 'Meera Iyer', email: 'meera.i@example.com', phone: '+91 98765 43216', branch: 'Mechanical Engineering', batch: '2021-25', year: '4th Year', status: 'Active' },
-        { id: 'STU2021124', name: 'Sanjay Gupta', email: 'sanjay.g@example.com', phone: '+91 98765 43217', branch: 'Computer Science', batch: '2021-25', year: '4th Year', status: 'Active' },
-      ];
-      setStudents(initial as Student[]);
-      localStorage.setItem('edunexus_students', JSON.stringify(initial));
-    }
+    const init = async () => {
+      await fetchAcademicSettings();
+      await fetchCourses();
+      await fetchStudents();
+    };
+    init();
   }, []);
 
-  const saveStudents = (newStudents: Student[]) => {
+  const fetchAcademicSettings = async () => {
+    const { data, error } = await supabase.from('app_settings').select('*').eq('key', 'academic').single();
+    if (data && data.value) {
+      setAcademicSettings(data.value);
+    }
+  };
+
+  const fetchCourses = async () => {
+    const { data } = await supabase.from('courses').select('*');
+    if (data) setCourses(data);
+  };
+
+  const fetchStudents = async () => {
+    const { data, error } = await supabase
+      .from('students')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching students:', error);
+      // Fallback to local storage if supabase fails
+      const saved = localStorage.getItem('edunexus_students');
+      if (saved) setStudents(JSON.parse(saved));
+    } else if (data) {
+      const formattedStudents: Student[] = data.map(s => {
+        const studentCourse = courses.find(c => c.id === s.branch);
+        return {
+          id: s.id,
+          rollNumber: s.roll_no || '',
+          title: s.title,
+          firstName: s.first_name,
+          middleName: s.middle_name,
+          surname: s.surname,
+          name: s.name,
+          email: s.email || '',
+          phone: s.phone || '',
+          branch: studentCourse?.name || s.branch || '',
+          batch: s.batch || '',
+          year: s.year || '',
+          bloodGroup: s.blood_group,
+          religion: s.religion,
+          caste: s.caste,
+          category: s.category,
+          address: s.address,
+          state: s.state,
+          pincode: s.pincode,
+          fatherName: s.father_name,
+          fatherOccupation: s.father_occupation,
+          motherName: s.mother_name,
+          motherOccupation: s.mother_occupation,
+          parentPhone: s.parent_phone,
+          parentEmail: s.parent_email,
+          emergencyName: s.emergency_name,
+          emergencyPhone: s.emergency_phone,
+          emergencyAddress: s.emergency_address,
+          allergy: s.allergies,
+          status: s.status as 'Active' | 'Inactive'
+        };
+      });
+      setStudents(formattedStudents);
+      localStorage.setItem('edunexus_students', JSON.stringify(formattedStudents));
+    }
+  };
+
+  const saveStudents = async (newStudents: Student[]) => {
     setStudents(newStudents);
     localStorage.setItem('edunexus_students', JSON.stringify(newStudents));
+  };
+
+  const addStudentToSupabase = async (student: any) => {
+    const { error } = await supabase.from('students').insert([student]);
+    if (error) console.error('Error adding student to Supabase:', error);
+  };
+
+  const updateStudentInSupabase = async (student: any) => {
+    const { error } = await supabase.from('students').update(student).eq('id', student.id);
+    if (error) console.error('Error updating student in Supabase:', error);
+  };
+
+  const deleteStudentFromSupabase = async (id: string) => {
+    const { error } = await supabase.from('students').delete().eq('id', id);
+    if (error) console.error('Error deleting student from Supabase:', error);
   };
 
   // Registration Form State
@@ -77,6 +186,7 @@ export const Students: React.FC = () => {
     firstName: '',
     middleName: '',
     surname: '',
+    rollNumber: '', // Added rollNumber
     branch: '',
     batch: '',
     year: '',
@@ -99,6 +209,10 @@ export const Students: React.FC = () => {
     emergencyAddress: '',
     emergencyPhone: '',
     allergy: '',
+    photoUrl: '',
+    studentDocsUrl: '',
+    parentDocsUrl: '',
+    signatureUrl: '',
   });
 
   const [generatedId, setGeneratedId] = useState('');
@@ -116,85 +230,151 @@ export const Students: React.FC = () => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     
-    const newStudent: Student = {
+    const studentData = {
       id: editingStudent?.id || generatedId,
+      roll_no: formData.rollNumber,
+      title: formData.title,
+      first_name: formData.firstName,
+      middle_name: formData.middleName,
+      surname: formData.surname,
       name: `${formData.firstName} ${formData.surname}`,
       email: formData.email,
       phone: formData.phone,
       branch: formData.branch,
       batch: formData.batch,
       year: formData.year,
+      blood_group: formData.bloodGroup,
+      religion: formData.religion,
+      caste: formData.caste,
+      category: formData.category,
+      address: formData.address,
+      state: formData.state,
+      pincode: formData.pincode,
+      father_name: formData.fatherName,
+      father_occupation: formData.fatherOccupation,
+      mother_name: formData.motherName,
+      mother_occupation: formData.motherOccupation,
+      parent_phone: formData.parentPhone,
+      parent_email: formData.parentEmail,
+      emergency_name: formData.emergencyName,
+      emergency_phone: formData.emergencyPhone,
+      emergency_address: formData.emergencyAddress,
+      allergies: formData.allergy,
+      photo_url: formData.photoUrl,
+      student_docs_url: formData.studentDocsUrl,
+      parent_docs_url: formData.parentDocsUrl,
+      signature_url: formData.signatureUrl,
       status: 'Active'
     };
 
     if (editingStudent) {
-      saveStudents(students.map(s => s.id === editingStudent.id ? newStudent : s));
+      await updateStudentInSupabase(studentData);
     } else {
-      saveStudents([...students, newStudent]);
+      await addStudentToSupabase(studentData);
+      
+      // Automatic Fee Selection
+      const { data: feeGroup } = await supabase
+        .from('fee_groups')
+        .select('*')
+        .eq('course_id', formData.branch)
+        .limit(1)
+        .single();
+      
+      if (feeGroup) {
+        await supabase.from('fees').insert({
+          student_id: studentData.id,
+          amount: feeGroup.total_amount,
+          date: new Date().toISOString().split('T')[0],
+          status: 'PENDING',
+          description: `Enrollment Fee: ${feeGroup.name}`
+        });
+      }
     }
 
-    // Simulate API call
+    await fetchStudents();
+    setIsSubmitting(false);
+    setShowSuccess(true);
     setTimeout(() => {
-      setIsSubmitting(false);
-      setShowSuccess(true);
-      setTimeout(() => {
-        setShowSuccess(false);
-        setView('list');
-        setEditingStudent(null);
-        setFormData({
-          title: 'Mr.',
-          firstName: '',
-          middleName: '',
-          surname: '',
-          branch: '',
-          batch: '',
-          year: '',
-          phone: '',
-          email: '',
-          address: '',
-          bloodGroup: '',
-          religion: '',
-          caste: '',
-          category: '',
-          state: '',
-          pincode: '',
-          fatherName: '',
-          fatherOccupation: '',
-          motherName: '',
-          motherOccupation: '',
-          parentPhone: '',
-          parentEmail: '',
-          emergencyName: '',
-          emergencyAddress: '',
-          emergencyPhone: '',
-          allergy: '',
-        });
-      }, 2000);
-    }, 1500);
+      setShowSuccess(false);
+      setView('list');
+      setEditingStudent(null);
+      setFormData({
+        title: 'Mr.',
+        firstName: '',
+        middleName: '',
+        surname: '',
+        rollNumber: '',
+        branch: '',
+        batch: '',
+        year: '',
+        phone: '',
+        email: '',
+        address: '',
+        bloodGroup: '',
+        religion: '',
+        caste: '',
+        category: '',
+        state: '',
+        pincode: '',
+        fatherName: '',
+        fatherOccupation: '',
+        motherName: '',
+        motherOccupation: '',
+        parentPhone: '',
+        parentEmail: '',
+        emergencyName: '',
+        emergencyAddress: '',
+        emergencyPhone: '',
+        allergy: '',
+      });
+    }, 2000);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this student record?')) {
-      saveStudents(students.filter(s => s.id !== id));
+      await deleteStudentFromSupabase(id);
+      setStudents(students.filter(s => s.id !== id));
     }
   };
 
   const handleEdit = (student: Student) => {
     setEditingStudent(student);
-    const [first, ...rest] = student.name.split(' ');
     setFormData({
-      ...formData,
-      firstName: first,
-      surname: rest.join(' '),
-      email: student.email,
-      phone: student.phone,
-      branch: student.branch,
-      batch: student.batch,
-      year: student.year
+      title: student.title || 'Mr.',
+      firstName: student.firstName || '',
+      middleName: student.middleName || '',
+      surname: student.surname || '',
+      rollNumber: student.rollNumber || '',
+      branch: student.branch || '',
+      batch: student.batch || '',
+      year: student.year || '',
+      phone: student.phone || '',
+      email: student.email || '',
+      address: student.address || '',
+      bloodGroup: student.bloodGroup || '',
+      religion: student.religion || '',
+      caste: student.caste || '',
+      category: student.category || '',
+      state: student.state || '',
+      pincode: student.pincode || '',
+      fatherName: student.fatherName || '',
+      fatherOccupation: student.fatherOccupation || '',
+      motherName: student.motherName || '',
+      motherOccupation: student.motherOccupation || '',
+      parentPhone: student.parentPhone || '',
+      parentEmail: student.parentEmail || '',
+      emergencyName: student.emergencyName || '',
+      emergencyAddress: student.emergencyAddress || '',
+      emergencyPhone: student.emergencyPhone || '',
+      allergy: student.allergy || '',
+      photoUrl: (student as any).photoUrl || '',
+      studentDocsUrl: (student as any).studentDocsUrl || '',
+      parentDocsUrl: (student as any).parentDocsUrl || '',
+      signatureUrl: (student as any).signatureUrl || '',
     });
     setGeneratedId(student.id);
     setView('register');
@@ -289,6 +469,7 @@ export const Students: React.FC = () => {
                   <tr className="bg-primary/5 border-b border-primary/10">
                     <th className="px-6 py-4 text-xs font-bold text-primary uppercase tracking-wider">Student</th>
                     <th className="px-6 py-4 text-xs font-bold text-primary uppercase tracking-wider">ID</th>
+                    <th className="px-6 py-4 text-xs font-bold text-primary uppercase tracking-wider">Roll No</th>
                     <th className="px-6 py-4 text-xs font-bold text-primary uppercase tracking-wider">Branch & Year</th>
                     <th className="px-6 py-4 text-xs font-bold text-primary uppercase tracking-wider">Contact</th>
                     <th className="px-6 py-4 text-xs font-bold text-primary uppercase tracking-wider">Status</th>
@@ -298,7 +479,8 @@ export const Students: React.FC = () => {
                 <tbody className="divide-y divide-slate-100">
                   {students.filter(s => 
                     s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                    s.id.toLowerCase().includes(searchQuery.toLowerCase())
+                    s.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    (s.rollNumber && s.rollNumber.toLowerCase().includes(searchQuery.toLowerCase()))
                   ).map((student) => (
                     <tr key={student.id} className="hover:bg-primary/5 transition-colors group">
                       <td className="px-6 py-4">
@@ -315,6 +497,11 @@ export const Students: React.FC = () => {
                       <td className="px-6 py-4">
                         <span className="text-sm font-mono font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-lg">
                           {student.id}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm font-bold text-indigo-600">
+                          {student.rollNumber || '-'}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -440,6 +627,18 @@ export const Students: React.FC = () => {
                   />
                 </div>
                 <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Roll Number</label>
+                  <input 
+                    type="text" 
+                    name="rollNumber"
+                    required
+                    value={formData.rollNumber}
+                    onChange={handleInputChange}
+                    placeholder="Enter roll number"
+                    className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Branch</label>
                   <select 
                     name="branch"
@@ -449,10 +648,9 @@ export const Students: React.FC = () => {
                     className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
                   >
                     <option value="">Select Branch</option>
-                    <option>Computer Science</option>
-                    <option>Information Technology</option>
-                    <option>Mechanical Engineering</option>
-                    <option>Civil Engineering</option>
+                    {academicSettings.branches.map((b: string) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="space-y-2">
@@ -465,9 +663,9 @@ export const Students: React.FC = () => {
                     className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
                   >
                     <option value="">Select Batch</option>
-                    <option>2024-28</option>
-                    <option>2023-27</option>
-                    <option>2022-26</option>
+                    {academicSettings.batches.map((b: string) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="space-y-2">
@@ -543,25 +741,31 @@ export const Students: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Religion</label>
-                  <input 
-                    type="text" 
+                  <select 
                     name="religion"
                     value={formData.religion}
                     onChange={handleInputChange}
-                    placeholder="Enter religion"
                     className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                  />
+                  >
+                    <option value="">Select Religion</option>
+                    {academicSettings.religions.map((r: string) => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Caste</label>
-                  <input 
-                    type="text" 
+                  <select 
                     name="caste"
                     value={formData.caste}
                     onChange={handleInputChange}
-                    placeholder="Enter caste"
                     className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                  />
+                  >
+                    <option value="">Select Caste</option>
+                    {academicSettings.castes.map((c: string) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Category</label>
@@ -608,10 +812,9 @@ export const Students: React.FC = () => {
                       className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
                     >
                       <option value="">Select State</option>
-                      <option>Maharashtra</option>
-                      <option>Delhi</option>
-                      <option>Karnataka</option>
-                      <option>Gujarat</option>
+                      {indianStates.map(state => (
+                        <option key={state} value={state}>{state}</option>
+                      ))}
                     </select>
                   </div>
                   <div className="space-y-2">
@@ -632,9 +835,33 @@ export const Students: React.FC = () => {
               <div className="space-y-4">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Upload Student Photo</label>
                 <div className="flex items-center gap-6">
-                  <div className="w-32 h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group">
-                    <Camera className="w-8 h-8 mb-2 group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-bold">Upload Photo</span>
+                  <div 
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = 'image/*';
+                      input.onchange = (e: any) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            setFormData(prev => ({ ...prev, photoUrl: event.target?.result as string }));
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      };
+                      input.click();
+                    }}
+                    className="w-32 h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group overflow-hidden"
+                  >
+                    {formData.photoUrl ? (
+                      <img src={formData.photoUrl} alt="Student" className="w-full h-full object-cover" />
+                    ) : (
+                      <>
+                        <Camera className="w-8 h-8 mb-2 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-bold">Upload Photo</span>
+                      </>
+                    )}
                   </div>
                   <div className="text-xs text-slate-500 space-y-1">
                     <p className="font-bold text-primary">Requirements:</p>
@@ -825,25 +1052,106 @@ export const Students: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div className="space-y-4">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Student Documents</label>
-                  <div className="h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group">
-                    <Upload className="w-6 h-6 mb-2 group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-bold">Upload (PDF/JPG)</span>
+                  <div 
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = '.pdf,image/*';
+                      input.onchange = (e: any) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            setFormData(prev => ({ ...prev, studentDocsUrl: event.target?.result as string }));
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      };
+                      input.click();
+                    }}
+                    className="h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group overflow-hidden"
+                  >
+                    {formData.studentDocsUrl ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <CheckCircle2 className="w-8 h-8 text-green-500" />
+                        <span className="text-[10px] font-bold text-green-600">Uploaded</span>
+                      </div>
+                    ) : (
+                      <>
+                        <Upload className="w-6 h-6 mb-2 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-bold">Upload (PDF/JPG)</span>
+                      </>
+                    )}
                   </div>
                   <p className="text-[10px] text-slate-400 text-center">Aadhar, Marksheets, etc.</p>
                 </div>
                 <div className="space-y-4">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Parent Documents</label>
-                  <div className="h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group">
-                    <Upload className="w-6 h-6 mb-2 group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-bold">Upload (PDF/JPG)</span>
+                  <div 
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = '.pdf,image/*';
+                      input.onchange = (e: any) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            setFormData(prev => ({ ...prev, parentDocsUrl: event.target?.result as string }));
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      };
+                      input.click();
+                    }}
+                    className="h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group overflow-hidden"
+                  >
+                    {formData.parentDocsUrl ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <CheckCircle2 className="w-8 h-8 text-green-500" />
+                        <span className="text-[10px] font-bold text-green-600">Uploaded</span>
+                      </div>
+                    ) : (
+                      <>
+                        <Upload className="w-6 h-6 mb-2 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-bold">Upload (PDF/JPG)</span>
+                      </>
+                    )}
                   </div>
                   <p className="text-[10px] text-slate-400 text-center">Parent ID Proofs</p>
                 </div>
                 <div className="space-y-4">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Student Signature</label>
-                  <div className="h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group">
-                    <Upload className="w-6 h-6 mb-2 group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-bold">Upload Signature</span>
+                  <div 
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = 'image/*';
+                      input.onchange = (e: any) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            setFormData(prev => ({ ...prev, signatureUrl: event.target?.result as string }));
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      };
+                      input.click();
+                    }}
+                    className="h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group overflow-hidden"
+                  >
+                    {formData.signatureUrl ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <CheckCircle2 className="w-8 h-8 text-green-500" />
+                        <span className="text-[10px] font-bold text-green-600">Uploaded</span>
+                      </div>
+                    ) : (
+                      <>
+                        <Upload className="w-6 h-6 mb-2 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-bold">Upload Signature</span>
+                      </>
+                    )}
                   </div>
                   <p className="text-[10px] text-slate-400 text-center">Clear image of signature</p>
                 </div>

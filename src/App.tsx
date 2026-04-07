@@ -15,6 +15,7 @@ import { Admissions } from './modules/Admissions/Admissions';
 import { Faculty } from './modules/Faculty/Faculty';
 import { Reports } from './modules/Reports/Reports';
 import { Courses } from './modules/Courses/Courses';
+import { FrontOffice } from './modules/FrontOffice/FrontOffice';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isLoading } = useAuth();
@@ -109,6 +110,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <Courses />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/front-office" 
+            element={
+              <ProtectedRoute>
+                <FrontOffice />
               </ProtectedRoute>
             } 
           />

@@ -19,10 +19,14 @@ import {
   Trash2,
   X,
   Save,
-  FileText
+  FileText,
+  Printer,
+  Share2,
+  Smartphone
 } from 'lucide-react';
 import { cn, formatCurrency, formatDate } from '../../lib/utils';
-import { motion } from 'motion/react';
+import { supabase } from '../../lib/supabase';
+import { motion, AnimatePresence } from 'motion/react';
 import { exportToPDF, exportToExcel } from '../../lib/exportUtils';
 
 interface FeeTransaction {
@@ -31,78 +35,418 @@ interface FeeTransaction {
   roll: string;
   amount: number;
   date: string;
-  status: 'PAID' | 'PENDING' | 'OVERDUE';
+  dueDate: string;
+  status: 'PAID' | 'PENDING' | 'OVERDUE' | 'PARTIAL';
   type: string;
-  phone?: string;
+  feeGroup: string;
+  frequency: 'MONTHLY' | 'QUARTERLY' | 'YEARLY' | 'ONE_TIME';
+  phone: string;
+  parentPhone: string;
+  fine: number;
+  discount: number;
+  discountReason: string;
+  paymentMode: 'CASH' | 'UPI' | 'CARD';
+  transactionId?: string;
+  installments?: { amount: number; date: string; status: 'PAID' | 'PENDING' }[];
+}
+
+interface FeeGroup {
+  id: string;
+  name: string;
+  description: string;
+  course_id: string;
+  total_amount: number;
+  items: { name: string; amount: number }[];
 }
 
 export const Fees: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'transactions' | 'groups'>('transactions');
   const [transactions, setTransactions] = useState<FeeTransaction[]>([]);
+  const [feeGroups, setFeeGroups] = useState<FeeGroup[]>([]);
+  const [courses, setCourses] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [editingTxn, setEditingTxn] = useState<FeeTransaction | null>(null);
-  const [form, setForm] = useState<Partial<FeeTransaction>>({});
+  const [editingGroup, setEditingGroup] = useState<FeeGroup | null>(null);
+  
+  const [form, setForm] = useState<Partial<FeeTransaction>>({
+    status: 'PENDING',
+    paymentMode: 'CASH',
+    frequency: 'MONTHLY',
+    fine: 0,
+    discount: 0
+  });
+
+  const [groupForm, setGroupForm] = useState<Partial<FeeGroup>>({
+    name: '',
+    description: '',
+    course_id: '',
+    items: [{ name: 'Tuition Fee', amount: 0 }]
+  });
 
   useEffect(() => {
-    const saved = localStorage.getItem('edunexus_fees');
-    if (saved) {
-      setTransactions(JSON.parse(saved));
-    } else {
-      const initial = [
-        { id: 'TXN001', student: 'Rahul Sharma', roll: 'CS202601', amount: 45000, date: '2026-10-10', status: 'PAID', type: 'Tuition Fee', phone: '+91 98765 43210' },
-        { id: 'TXN002', student: 'Priya Patel', roll: 'CS202602', amount: 5000, date: '2026-10-09', status: 'PAID', type: 'Exam Fee', phone: '+91 98765 43211' },
-        { id: 'TXN003', student: 'Amit Kumar', roll: 'CS202603', amount: 45000, date: '2026-10-08', status: 'PENDING', type: 'Tuition Fee', phone: '+91 98765 43212' },
-        { id: 'TXN004', student: 'Siddharth Singh', roll: 'CS202604', amount: 2500, date: '2026-10-07', status: 'PAID', type: 'Library Fee', phone: '+91 98765 43213' },
-        { id: 'TXN005', student: 'Anjali Verma', roll: 'CS202605', amount: 45000, date: '2026-10-06', status: 'OVERDUE', type: 'Tuition Fee', phone: '+91 98765 43214' },
-        { id: 'TXN006', student: 'Vikram Malhotra', roll: 'CS202606', amount: 5000, date: '2026-10-05', status: 'PAID', type: 'Exam Fee', phone: '+91 98765 43215' },
-      ];
-      setTransactions(initial as FeeTransaction[]);
-      localStorage.setItem('edunexus_fees', JSON.stringify(initial));
-    }
+    const init = async () => {
+      await fetchCourses();
+      await fetchFeeGroups();
+      await fetchTransactions();
+    };
+    init();
   }, []);
 
-  const saveTxns = (newTxns: FeeTransaction[]) => {
-    setTransactions(newTxns);
-    localStorage.setItem('edunexus_fees', JSON.stringify(newTxns));
+  const fetchCourses = async () => {
+    const { data } = await supabase.from('courses').select('*');
+    if (data) setCourses(data);
   };
 
-  const handleSave = () => {
-    const newTxn: FeeTransaction = {
-      id: editingTxn?.id || `TXN${Math.floor(1000 + Math.random() * 9000)}`,
-      student: form.student || '',
-      roll: form.roll || '',
+  const fetchFeeGroups = async () => {
+    const { data, error } = await supabase.from('fee_groups').select('*, fee_group_items(*)');
+    if (error) {
+      console.error('Error fetching fee groups:', error);
+      return;
+    }
+    if (data) {
+      setFeeGroups(data.map(g => ({
+        id: g.id,
+        name: g.name,
+        description: g.description,
+        course_id: g.course_id,
+        total_amount: g.total_amount,
+        items: g.fee_group_items.map((i: any) => ({ name: i.name, amount: i.amount }))
+      })));
+    }
+  };
+
+  const fetchTransactions = async () => {
+    const { data, error } = await supabase.from('fees').select('*, students(*)').order('created_at', { ascending: false });
+    if (error) {
+      console.error('Error fetching fees:', error);
+      return;
+    }
+    if (data) {
+      setTransactions(data.map(t => {
+        const studentCourse = courses.find(c => c.id === t.students?.branch);
+        return {
+          id: t.id,
+          student: t.students?.name || 'Unknown',
+          roll: t.students?.roll_no || 'N/A',
+          amount: t.amount,
+          date: t.date,
+          dueDate: t.date, // Fallback
+          status: t.status as any,
+          type: t.description || 'Fee Payment',
+          feeGroup: studentCourse?.name || t.students?.branch || 'N/A',
+          frequency: 'MONTHLY',
+          phone: t.students?.phone || '',
+          parentPhone: t.students?.phone || '',
+          fine: 0,
+          discount: 0,
+          discountReason: '',
+          paymentMode: (t.payment_method as any) || 'CASH'
+        };
+      }));
+    }
+  };
+
+  const handleSave = async () => {
+    const txnData = {
       amount: Number(form.amount) || 0,
       date: form.date || new Date().toISOString().split('T')[0],
       status: form.status || 'PENDING',
-      type: form.type || 'Tuition Fee',
-      phone: form.phone || ''
+      payment_method: form.paymentMode || 'CASH',
+      description: form.type || 'Tuition Fee',
+      student_id: form.roll // Assuming roll is used as student ID for now or lookup needed
     };
 
     if (editingTxn) {
-      saveTxns(transactions.map(t => t.id === editingTxn.id ? newTxn : t));
+      await supabase.from('fees').update(txnData).eq('id', editingTxn.id);
     } else {
-      saveTxns([newTxn, ...transactions]);
+      await supabase.from('fees').insert(txnData);
     }
+    
+    await fetchTransactions();
     setIsModalOpen(false);
     setEditingTxn(null);
-    setForm({});
+    setForm({ status: 'PENDING', paymentMode: 'CASH', frequency: 'MONTHLY', fine: 0, discount: 0 });
   };
 
-  const handleDelete = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this transaction?')) {
-      saveTxns(transactions.filter(t => t.id !== id));
+  const handleSaveGroup = async () => {
+    const totalAmount = (groupForm.items || []).reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
+    const groupData = {
+      name: groupForm.name,
+      description: groupForm.description,
+      course_id: groupForm.course_id,
+      total_amount: totalAmount
+    };
+
+    let groupId = editingGroup?.id;
+
+    if (editingGroup) {
+      await supabase.from('fee_groups').update(groupData).eq('id', editingGroup.id);
+    } else {
+      const { data, error } = await supabase.from('fee_groups').insert(groupData).select().single();
+      if (error) {
+        console.error('Error saving fee group:', error);
+        return;
+      }
+      groupId = data.id;
+    }
+
+    // Handle items (delete old, insert new for simplicity in demo)
+    if (groupId) {
+      await supabase.from('fee_group_items').delete().eq('fee_group_id', groupId);
+      const itemsData = (groupForm.items || []).map(item => ({
+        fee_group_id: groupId,
+        name: item.name,
+        amount: Number(item.amount) || 0
+      }));
+      await supabase.from('fee_group_items').insert(itemsData);
+    }
+
+    await fetchFeeGroups();
+    setIsGroupModalOpen(false);
+    setEditingGroup(null);
+    setGroupForm({ name: '', description: '', course_id: '', items: [{ name: 'Tuition Fee', amount: 0 }] });
+  };
+
+  const handleRollChange = async (roll: string) => {
+    setForm({ ...form, roll });
+    if (roll.length > 2) {
+      const { data: student } = await supabase
+        .from('students')
+        .select('*, courses(*)')
+        .eq('roll_no', roll)
+        .single();
+      
+      if (student) {
+        // Find fee group for this student's branch/course
+        const { data: group } = await supabase
+          .from('fee_groups')
+          .select('*, fee_group_items(*)')
+          .eq('course_id', student.branch) // Assuming branch matches course ID or name
+          .limit(1)
+          .single();
+
+        setForm(prev => ({
+          ...prev,
+          student: student.name,
+          phone: student.phone,
+          parentPhone: student.parent_phone || student.phone,
+          feeGroup: group?.name || student.branch,
+          amount: group?.total_amount || 0,
+          type: group?.fee_group_items?.[0]?.name || 'Tuition Fee'
+        }));
+      }
     }
   };
 
-  const sendWhatsAppReminder = (txn: FeeTransaction) => {
-    const message = `Hello ${txn.student}, this is a reminder regarding your pending ${txn.type} of ${formatCurrency(txn.amount)}. Please clear your dues at the earliest. - EduNexus College`;
-    const url = `https://wa.me/${txn.phone?.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank');
+  const handleDelete = async (id: string) => {
+    if (window.confirm('Are you sure you want to delete this transaction?')) {
+      const { error } = await supabase.from('fees').delete().eq('id', id);
+      if (error) {
+        console.error('Error deleting transaction:', error);
+        return;
+      }
+      await fetchTransactions();
+    }
+  };
+
+  const shareReceipt = (txn: FeeTransaction) => {
+    const message = `*Fee Receipt - EduNexus College*\n\nStudent: ${txn.student}\nRoll No: ${txn.roll}\nFee Type: ${txn.type}\nAmount Paid: ${formatCurrency(txn.amount)}\nDate: ${formatDate(txn.date)}\nPayment Mode: ${txn.paymentMode}\nTransaction ID: ${txn.transactionId || 'N/A'}\n\nThank you for your payment!`;
+    
+    // Share to Student
+    const studentUrl = `https://wa.me/${(txn.phone || '').replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+    window.open(studentUrl, '_blank');
+
+    // Share to Parent
+    setTimeout(() => {
+      const parentUrl = `https://wa.me/${(txn.parentPhone || '').replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+      window.open(parentUrl, '_blank');
+    }, 1000);
+  };
+
+  const sendDueReminder = (txn: FeeTransaction) => {
+    const message = `*Fee Due Reminder - EduNexus College*\n\nHello ${txn.student},\nYour ${txn.type} of ${formatCurrency(txn.amount)} is due on ${formatDate(txn.dueDate)}. Please clear your dues to avoid fines.\n\nRegards,\nAccounts Dept.`;
+    
+    // Send to Student
+    const studentUrl = `https://wa.me/${(txn.phone || '').replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+    window.open(studentUrl, '_blank');
+
+    // Send to Parent
+    setTimeout(() => {
+      const parentUrl = `https://wa.me/${(txn.parentPhone || '').replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+      window.open(parentUrl, '_blank');
+    }, 1000);
+  };
+
+  const printReceipt = (txn: FeeTransaction) => {
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      const totalAmount = txn.amount + txn.fine - txn.discount;
+      const amountInWords = "Only"; // You could add a number-to-words utility here
+
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>Fee Receipt - ${txn.id}</title>
+            <style>
+              @page { size: A5 landscape; margin: 0; }
+              body { 
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+                margin: 0; 
+                padding: 20px; 
+                background-color: #fff;
+                color: #000;
+                width: 210mm;
+                height: 148mm;
+                box-sizing: border-box;
+              }
+              .receipt-container {
+                border: 2px solid #000;
+                padding: 15px;
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+                background-color: #fff0f5; /* Light pinkish background as per image */
+              }
+              .header { text-align: center; position: relative; margin-bottom: 10px; }
+              .logo { position: absolute; left: 0; top: 0; width: 60px; }
+              .foundation-name { font-size: 14px; font-weight: bold; margin: 0; }
+              .institution-name { font-size: 22px; font-weight: 900; margin: 2px 0; color: #800000; }
+              .estd { font-size: 10px; position: absolute; right: 0; top: 0; }
+              .id-no { font-size: 12px; position: absolute; right: 0; top: 20px; border: 1px solid #000; padding: 2px 10px; border-radius: 15px; }
+              .tagline { font-size: 10px; font-style: italic; margin-bottom: 5px; }
+              .receipt-title { 
+                text-align: center; 
+                font-size: 18px; 
+                font-weight: bold; 
+                text-decoration: underline; 
+                margin: 10px 0;
+              }
+              .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; font-size: 12px; }
+              .info-item { border-bottom: 1px dotted #000; padding-bottom: 2px; }
+              .info-label { font-weight: bold; }
+              
+              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 12px; }
+              th, td { border: 1px solid #000; padding: 5px; text-align: left; }
+              th { background-color: rgba(0,0,0,0.05); }
+              .col-sr { width: 40px; text-align: center; }
+              .col-amt { width: 120px; text-align: right; }
+              
+              .total-words { font-size: 12px; margin: 10px 0; border-bottom: 1px dotted #000; }
+              .notice { font-size: 8px; line-height: 1.2; margin-top: 10px; flex-grow: 1; }
+              .signatures { display: flex; justify-content: space-between; margin-top: 20px; font-size: 12px; font-weight: bold; }
+              .footer-address { text-align: center; font-size: 9px; margin-top: 10px; border-top: 1px solid #000; padding-top: 5px; }
+            </style>
+          </head>
+          <body>
+            <div class="receipt-container">
+              <div class="header">
+                <img src="https://picsum.photos/seed/college/100/100" class="logo" />
+                <p class="estd">Estd. 2015</p>
+                <p class="id-no">I.D. No: ${txn.id.replace('TXN', '')}</p>
+                <p class="foundation-name">Sri Kailashnath Foundation®</p>
+                <h1 class="institution-name">SUN GROUP OF INSTITUTIONS</h1>
+                <p class="tagline">"Education is a seed of success..."</p>
+              </div>
+
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 10px;">Admission | Lecture | Training assistance | Placement assistance</span>
+                <span style="font-size: 12px; font-weight: bold;">Date: ${formatDate(txn.date)}</span>
+              </div>
+
+              <div class="receipt-title">Fee Receipt</div>
+
+              <div class="info-grid">
+                <div class="info-item"><span class="info-label">Name of the Candidate:</span> ${txn.student}</div>
+                <div class="info-item"><span class="info-label">Course:</span> ${txn.feeGroup}</div>
+                <div class="info-item"><span class="info-label">Sem/Year:</span> ${txn.frequency}</div>
+                <div class="info-item"><span class="info-label">Batch/Reg.No.:</span> ${txn.roll}</div>
+              </div>
+
+              <table>
+                <thead>
+                  <tr>
+                    <th class="col-sr">Sr. No.</th>
+                    <th>Particulars</th>
+                    <th>Mode of Payment</th>
+                    <th class="col-amt">Amount (Rs.)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="col-sr">01</td>
+                    <td>${txn.type}</td>
+                    <td>${txn.paymentMode}</td>
+                    <td class="col-amt">${txn.amount.toFixed(2)}</td>
+                  </tr>
+                  ${txn.fine > 0 ? `
+                  <tr>
+                    <td class="col-sr">02</td>
+                    <td>Late Fine</td>
+                    <td>-</td>
+                    <td class="col-amt">${txn.fine.toFixed(2)}</td>
+                  </tr>` : ''}
+                  ${txn.discount > 0 ? `
+                  <tr>
+                    <td class="col-sr">03</td>
+                    <td>Discount</td>
+                    <td>-</td>
+                    <td class="col-amt">-${txn.discount.toFixed(2)}</td>
+                  </tr>` : ''}
+                  <tr>
+                    <td colspan="3" style="text-align: right; font-weight: bold;">Total =</td>
+                    <td class="col-amt" style="font-weight: bold;">${totalAmount.toFixed(2)}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="total-words">
+                <span class="info-label">Total in words:</span> Rupees ${totalAmount} ${amountInWords}
+              </div>
+
+              <div class="notice">
+                <strong>Notice:</strong><br/>
+                1) Fee once paid will not be returned or transferred under any circumstances.<br/>
+                2) Admission will not be cancelled, if you will cancel the admission, you have to pay total course academic fee.<br/>
+                3) Please submit all original documents in College/University for Government verification.<br/>
+                4) Please follow rules and regulations of Institutions as per Notice Board.<br/>
+                5) Parent, Please visit office Weekly or Monthly after prior appointment for any queries.
+              </div>
+
+              <div class="signatures">
+                <span>Candidate's Sign</span>
+                <span>Authority's Sign</span>
+              </div>
+
+              <div class="footer-address">
+                B-10, Industrial Market, Sakinaka Metro Station, Near Gate No. 5, Andheri (E), Mumbai 400072
+              </div>
+            </div>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => {
+        printWindow.print();
+        printWindow.close();
+      }, 500);
+    }
   };
 
   const handleExportPDF = () => {
-    const headers = ['ID', 'Student', 'Roll No', 'Type', 'Amount', 'Date', 'Status'];
-    const data = transactions.map(t => [t.id, t.student, t.roll, t.type, formatCurrency(t.amount), formatDate(t.date), t.status]);
+    const headers = ['ID', 'Student', 'Type', 'Amount', 'Fine', 'Disc', 'Total', 'Status'];
+    const data = transactions.map(t => [
+      t.id, 
+      t.student, 
+      t.type, 
+      formatCurrency(t.amount), 
+      formatCurrency(t.fine), 
+      formatCurrency(t.discount), 
+      formatCurrency(t.amount + t.fine - t.discount),
+      t.status
+    ]);
     exportToPDF('Fee Collection Report', headers, data, 'Fee_Report');
   };
 
@@ -122,7 +466,7 @@ export const Fees: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Fee Management</h1>
-          <p className="text-slate-500">Track collections, pending payments, and generate receipts.</p>
+          <p className="text-slate-500">Track collections, manage installments, and generate receipts.</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
@@ -141,27 +485,67 @@ export const Fees: React.FC = () => {
               Excel
             </button>
           </div>
-          <button 
-            onClick={() => {
-              setEditingTxn(null);
-              setForm({});
-              setIsModalOpen(true);
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-bold hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
-          >
-            <Plus className="w-4 h-4" />
-            New Payment
-          </button>
+          {activeTab === 'transactions' ? (
+            <button 
+              onClick={() => {
+                setEditingTxn(null);
+                setForm({ status: 'PENDING', paymentMode: 'CASH', frequency: 'MONTHLY', fine: 0, discount: 0 });
+                setIsModalOpen(true);
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-bold hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
+            >
+              <Plus className="w-4 h-4" />
+              New Payment
+            </button>
+          ) : (
+            <button 
+              onClick={() => {
+                setEditingGroup(null);
+                setGroupForm({ name: '', description: '', course_id: '', items: [{ name: 'Tuition Fee', amount: 0 }] });
+                setIsGroupModalOpen(true);
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200"
+            >
+              <Plus className="w-4 h-4" />
+              New Fee Group
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Stats Grid */}
+      {/* Tabs */}
+      <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-2xl w-fit">
+        <button
+          onClick={() => setActiveTab('transactions')}
+          className={cn(
+            "flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all",
+            activeTab === 'transactions' ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-700"
+          )}
+        >
+          <Receipt className="w-4 h-4" />
+          Transactions
+        </button>
+        <button
+          onClick={() => setActiveTab('groups')}
+          className={cn(
+            "flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all",
+            activeTab === 'groups' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+          )}
+        >
+          <Wallet className="w-4 h-4" />
+          Fee Groups
+        </button>
+      </div>
+
+      {activeTab === 'transactions' ? (
+        <>
+          {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
-          { title: 'Total Collection', value: formatCurrency(transactions.filter(t => t.status === 'PAID').reduce((acc, t) => acc + t.amount, 0)), change: '+12%', icon: Wallet, color: 'text-green-600', bg: 'bg-green-50', trend: 'up' },
+          { title: 'Total Collection', value: formatCurrency(transactions.filter(t => t.status === 'PAID').reduce((acc, t) => acc + t.amount + t.fine - t.discount, 0)), change: '+12%', icon: Wallet, color: 'text-green-600', bg: 'bg-green-50', trend: 'up' },
           { title: 'Pending Fees', value: formatCurrency(transactions.filter(t => t.status === 'PENDING').reduce((acc, t) => acc + t.amount, 0)), change: '-5%', icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50', trend: 'down' },
           { title: 'Overdue Payments', value: formatCurrency(transactions.filter(t => t.status === 'OVERDUE').reduce((acc, t) => acc + t.amount, 0)), change: '+8%', icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-50', trend: 'up' },
-          { title: 'Total Expected', value: formatCurrency(transactions.reduce((acc, t) => acc + t.amount, 0)), change: '+25%', icon: CreditCard, color: 'text-blue-600', bg: 'bg-blue-50', trend: 'up' },
+          { title: 'Total Discounts', value: formatCurrency(transactions.reduce((acc, t) => acc + t.discount, 0)), change: '+2%', icon: TrendingDown, color: 'text-indigo-600', bg: 'bg-indigo-50', trend: 'up' },
         ].map((stat, index) => (
           <motion.div
             key={stat.title}
@@ -196,21 +580,15 @@ export const Fees: React.FC = () => {
             <input 
               type="text" 
               placeholder="Search student, roll no or transaction ID..."
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 outline-none"
             />
           </div>
           <button className="flex items-center gap-2 px-4 py-2 bg-slate-50 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-100 transition-colors">
             <Filter className="w-4 h-4" />
             Filters
           </button>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-slate-500">Sort by:</span>
-          <select className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none">
-            <option>Latest First</option>
-            <option>Amount: High to Low</option>
-            <option>Amount: Low to High</option>
-          </select>
         </div>
       </div>
 
@@ -222,9 +600,9 @@ export const Fees: React.FC = () => {
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Transaction ID</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Student</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Type</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Amount</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Date</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Type & Group</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Amount Details</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Due Date</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Action</th>
               </tr>
@@ -240,6 +618,7 @@ export const Fees: React.FC = () => {
                 >
                   <td className="px-6 py-4">
                     <span className="text-sm font-bold text-slate-800">{txn.id}</span>
+                    {txn.transactionId && <p className="text-[10px] text-slate-400">Ref: {txn.transactionId}</p>}
                   </td>
                   <td className="px-6 py-4">
                     <div>
@@ -248,13 +627,18 @@ export const Fees: React.FC = () => {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="text-sm text-slate-600">{txn.type}</span>
+                    <p className="text-sm text-slate-600 font-medium">{txn.type}</p>
+                    <p className="text-xs text-slate-400">{txn.feeGroup}</p>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="text-sm font-bold text-slate-900">{formatCurrency(txn.amount)}</span>
+                    <div className="text-sm">
+                      <p className="font-bold text-slate-900">{formatCurrency(txn.amount + txn.fine - txn.discount)}</p>
+                      {txn.fine > 0 && <p className="text-[10px] text-rose-500">Fine: +{formatCurrency(txn.fine)}</p>}
+                      {txn.discount > 0 && <p className="text-[10px] text-green-500">Disc: -{formatCurrency(txn.discount)}</p>}
+                    </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="text-sm text-slate-500">{formatDate(txn.date)}</span>
+                    <span className="text-sm text-slate-500">{formatDate(txn.dueDate)}</span>
                   </td>
                   <td className="px-6 py-4">
                     <span className={cn(
@@ -267,22 +651,34 @@ export const Fees: React.FC = () => {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      {txn.status !== 'PAID' && (
-                        <button 
-                          onClick={() => sendWhatsAppReminder(txn)}
-                          title="Send WhatsApp Reminder"
-                          className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                        >
-                          <MessageSquare className="w-4 h-4" />
-                        </button>
-                      )}
+                      <button 
+                        onClick={() => sendDueReminder(txn)}
+                        title="Send Due Reminder"
+                        className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                      >
+                        <Smartphone className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => shareReceipt(txn)}
+                        title="Share on WhatsApp"
+                        className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                      >
+                        <Share2 className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => printReceipt(txn)}
+                        title="Print Receipt"
+                        className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-colors"
+                      >
+                        <Printer className="w-4 h-4" />
+                      </button>
                       <button 
                         onClick={() => {
                           setEditingTxn(txn);
                           setForm(txn);
                           setIsModalOpen(true);
                         }}
-                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-colors"
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
@@ -292,9 +688,6 @@ export const Fees: React.FC = () => {
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
-                      <button className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors">
-                        <Receipt className="w-4 h-4" />
-                      </button>
                     </div>
                   </td>
                 </motion.tr>
@@ -303,110 +696,373 @@ export const Fees: React.FC = () => {
           </table>
         </div>
       </div>
-      {/* Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-primary/20 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-[32px] shadow-2xl w-full max-w-xl overflow-hidden"
-          >
-            <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-primary/5">
-              <div>
-                <h2 className="text-2xl font-black text-primary">{editingTxn ? 'Edit Payment' : 'New Payment'}</h2>
-                <p className="text-slate-500 text-sm">Enter payment details below.</p>
-              </div>
-              <button 
-                onClick={() => setIsModalOpen(false)}
-                className="p-2 hover:bg-white rounded-xl transition-colors"
-              >
-                <X className="w-6 h-6 text-slate-400" />
-              </button>
-            </div>
-            <div className="p-8 space-y-6">
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Student Name</label>
-                  <input 
-                    type="text" 
-                    value={form.student || ''}
-                    onChange={(e) => setForm({...form, student: e.target.value})}
-                    className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                  />
+    </>
+  ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {feeGroups.map((group) => (
+            <motion.div
+              key={group.id}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm hover:shadow-md transition-all group"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600">
+                  <Wallet className="w-6 h-6" />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Roll No</label>
-                  <input 
-                    type="text" 
-                    value={form.roll || ''}
-                    onChange={(e) => setForm({...form, roll: e.target.value})}
-                    className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Phone (WhatsApp)</label>
-                  <input 
-                    type="tel" 
-                    value={form.phone || ''}
-                    onChange={(e) => setForm({...form, phone: e.target.value})}
-                    className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Amount</label>
-                  <input 
-                    type="number" 
-                    value={form.amount || ''}
-                    onChange={(e) => setForm({...form, amount: Number(e.target.value)})}
-                    className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fee Type</label>
-                  <select 
-                    value={form.type || 'Tuition Fee'}
-                    onChange={(e) => setForm({...form, type: e.target.value})}
-                    className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button 
+                    onClick={() => {
+                      setEditingGroup(group);
+                      setGroupForm(group);
+                      setIsGroupModalOpen(true);
+                    }}
+                    className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
                   >
-                    <option>Tuition Fee</option>
-                    <option>Exam Fee</option>
-                    <option>Library Fee</option>
-                    <option>Hostel Fee</option>
-                    <option>Other</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Status</label>
-                  <select 
-                    value={form.status || 'PENDING'}
-                    onChange={(e) => setForm({...form, status: e.target.value as any})}
-                    className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                  >
-                    <option>PAID</option>
-                    <option>PENDING</option>
-                    <option>OVERDUE</option>
-                  </select>
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
-            </div>
-            <div className="p-8 bg-slate-50 flex items-center justify-end gap-3">
-              <button 
-                onClick={() => setIsModalOpen(false)}
-                className="px-6 py-3 text-slate-500 font-bold hover:text-primary transition-colors"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={handleSave}
-                className="flex items-center gap-2 px-8 py-3 bg-primary text-white rounded-2xl font-bold hover:bg-primary/90 transition-all shadow-lg shadow-primary/20"
-              >
-                <Save className="w-5 h-5" />
-                {editingTxn ? 'Update' : 'Save'}
-              </button>
-            </div>
-          </motion.div>
+              <h3 className="text-lg font-black text-slate-800 mb-1">{group.name}</h3>
+              <p className="text-sm text-slate-500 mb-4">{group.description}</p>
+              
+              <div className="space-y-2 mb-6">
+                {group.items.map((item, idx) => (
+                  <div key={idx} className="flex items-center justify-between text-sm">
+                    <span className="text-slate-600">{item.name}</span>
+                    <span className="font-bold text-slate-800">{formatCurrency(item.amount)}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Amount</p>
+                  <p className="text-xl font-black text-indigo-600">{formatCurrency(group.total_amount)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Assigned Course</p>
+                  <p className="text-sm font-bold text-slate-700">{courses.find(c => c.id === group.course_id)?.name || 'None'}</p>
+                </div>
+              </div>
+            </motion.div>
+          ))}
         </div>
       )}
+
+      {/* Modal */}
+      <AnimatePresence>
+        {isModalOpen && (
+          <div className="fixed inset-0 bg-primary/20 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-[32px] shadow-2xl w-full max-w-3xl overflow-hidden"
+            >
+              <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-primary/5">
+                <div>
+                  <h2 className="text-2xl font-black text-primary">{editingTxn ? 'Edit Payment' : 'New Payment'}</h2>
+                  <p className="text-slate-500 text-sm">Enter detailed payment information.</p>
+                </div>
+                <button 
+                  onClick={() => setIsModalOpen(false)}
+                  className="p-2 hover:bg-white rounded-xl transition-colors"
+                >
+                  <X className="w-6 h-6 text-slate-400" />
+                </button>
+              </div>
+              <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Student Name</label>
+                    <input 
+                      type="text" 
+                      value={form.student || ''}
+                      onChange={(e) => setForm({...form, student: e.target.value})}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Roll No</label>
+                    <input 
+                      type="text" 
+                      value={form.roll || ''}
+                      onChange={(e) => handleRollChange(e.target.value)}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fee Group (Course)</label>
+                    <input 
+                      type="text" 
+                      value={form.feeGroup || ''}
+                      onChange={(e) => setForm({...form, feeGroup: e.target.value})}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Student Phone</label>
+                    <input 
+                      type="tel" 
+                      value={form.phone || ''}
+                      onChange={(e) => setForm({...form, phone: e.target.value})}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Parent Phone</label>
+                    <input 
+                      type="tel" 
+                      value={form.parentPhone || ''}
+                      onChange={(e) => setForm({...form, parentPhone: e.target.value})}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Frequency</label>
+                    <select 
+                      value={form.frequency || 'MONTHLY'}
+                      onChange={(e) => setForm({...form, frequency: e.target.value as any})}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    >
+                      <option value="MONTHLY">Monthly</option>
+                      <option value="QUARTERLY">Quarterly</option>
+                      <option value="YEARLY">Yearly</option>
+                      <option value="ONE_TIME">One Time</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Base Amount</label>
+                    <input 
+                      type="number" 
+                      value={form.amount || ''}
+                      onChange={(e) => setForm({...form, amount: Number(e.target.value)})}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fine (if any)</label>
+                    <input 
+                      type="number" 
+                      value={form.fine || 0}
+                      onChange={(e) => setForm({...form, fine: Number(e.target.value)})}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Discount</label>
+                    <input 
+                      type="number" 
+                      value={form.discount || 0}
+                      onChange={(e) => setForm({...form, discount: Number(e.target.value)})}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Discount Reason</label>
+                    <input 
+                      type="text" 
+                      value={form.discountReason || ''}
+                      onChange={(e) => setForm({...form, discountReason: e.target.value})}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Due Date</label>
+                    <input 
+                      type="date" 
+                      value={form.dueDate || ''}
+                      onChange={(e) => setForm({...form, dueDate: e.target.value})}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Payment Mode</label>
+                    <select 
+                      value={form.paymentMode || 'CASH'}
+                      onChange={(e) => setForm({...form, paymentMode: e.target.value as any})}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    >
+                      <option value="CASH">Cash</option>
+                      <option value="UPI">UPI</option>
+                      <option value="CARD">Card</option>
+                    </select>
+                  </div>
+                  {form.paymentMode !== 'CASH' && (
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Transaction ID</label>
+                      <input 
+                        type="text" 
+                        value={form.transactionId || ''}
+                        onChange={(e) => setForm({...form, transactionId: e.target.value})}
+                        className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                      />
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Status</label>
+                    <select 
+                      value={form.status || 'PENDING'}
+                      onChange={(e) => setForm({...form, status: e.target.value as any})}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    >
+                      <option value="PAID">Paid</option>
+                      <option value="PENDING">Pending</option>
+                      <option value="OVERDUE">Overdue</option>
+                      <option value="PARTIAL">Partial</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div className="p-8 bg-slate-50 flex items-center justify-end gap-3">
+                <button 
+                  onClick={() => setIsModalOpen(false)}
+                  className="px-6 py-3 text-slate-500 font-bold hover:text-primary transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleSave}
+                  className="flex items-center gap-2 px-8 py-3 bg-primary text-white rounded-2xl font-bold hover:bg-primary/90 transition-all shadow-lg shadow-primary/20"
+                >
+                  <Save className="w-5 h-5" />
+                  {editingTxn ? 'Update Payment' : 'Save Payment'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* Fee Group Modal */}
+      <AnimatePresence>
+        {isGroupModalOpen && (
+          <div className="fixed inset-0 bg-indigo-900/20 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-[32px] shadow-2xl w-full max-w-2xl overflow-hidden"
+            >
+              <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-indigo-50/50">
+                <div>
+                  <h2 className="text-2xl font-black text-indigo-600">{editingGroup ? 'Edit Fee Group' : 'New Fee Group'}</h2>
+                  <p className="text-slate-500 text-sm">Define fee components and link to a course.</p>
+                </div>
+                <button 
+                  onClick={() => setIsGroupModalOpen(false)}
+                  className="p-2 hover:bg-white rounded-xl transition-colors"
+                >
+                  <X className="w-6 h-6 text-slate-400" />
+                </button>
+              </div>
+              <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Group Name</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. B.Tech 1st Year Fees"
+                      value={groupForm.name || ''}
+                      onChange={(e) => setGroupForm({...groupForm, name: e.target.value})}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Assign to Course</label>
+                    <select 
+                      value={groupForm.course_id || ''}
+                      onChange={(e) => setGroupForm({...groupForm, course_id: e.target.value})}
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500/20 outline-none transition-all"
+                    >
+                      <option value="">Select Course</option>
+                      {courses.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Description</label>
+                  <textarea 
+                    value={groupForm.description || ''}
+                    onChange={(e) => setGroupForm({...groupForm, description: e.target.value})}
+                    className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500/20 outline-none transition-all resize-none"
+                    rows={2}
+                  />
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fee Items</label>
+                    <button 
+                      onClick={() => setGroupForm({...groupForm, items: [...(groupForm.items || []), { name: '', amount: 0 }]})}
+                      className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
+                    >
+                      <Plus className="w-3 h-3" /> Add Item
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    {groupForm.items?.map((item, idx) => (
+                      <div key={idx} className="flex items-center gap-3">
+                        <input 
+                          type="text" 
+                          placeholder="Item Name"
+                          value={item.name}
+                          onChange={(e) => {
+                            const newItems = [...(groupForm.items || [])];
+                            newItems[idx].name = e.target.value;
+                            setGroupForm({...groupForm, items: newItems});
+                          }}
+                          className="flex-1 px-4 py-2 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500/20 outline-none"
+                        />
+                        <input 
+                          type="number" 
+                          placeholder="Amount"
+                          value={item.amount || ''}
+                          onChange={(e) => {
+                            const newItems = [...(groupForm.items || [])];
+                            newItems[idx].amount = Number(e.target.value);
+                            setGroupForm({...groupForm, items: newItems});
+                          }}
+                          className="w-32 px-4 py-2 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500/20 outline-none"
+                        />
+                        <button 
+                          onClick={() => {
+                            const newItems = (groupForm.items || []).filter((_, i) => i !== idx);
+                            setGroupForm({...groupForm, items: newItems});
+                          }}
+                          className="p-2 text-slate-300 hover:text-rose-500 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="p-8 bg-slate-50 flex items-center justify-end gap-3">
+                <button 
+                  onClick={() => setIsGroupModalOpen(false)}
+                  className="px-6 py-3 text-slate-500 font-bold hover:text-indigo-600 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleSaveGroup}
+                  className="flex items-center gap-2 px-8 py-3 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                >
+                  <Save className="w-5 h-5" />
+                  {editingGroup ? 'Update Group' : 'Save Group'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

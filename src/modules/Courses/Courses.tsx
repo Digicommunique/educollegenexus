@@ -18,11 +18,15 @@ import {
   ChevronRight,
   CheckCircle2,
   AlertCircle,
-  X
+  X,
+  ClipboardList,
+  FileText,
+  History
 } from 'lucide-react';
 import { cn, formatDate } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../../hooks/useAuth';
+import { supabase } from '../../lib/supabase';
 
 interface Course {
   id: string;
@@ -31,8 +35,28 @@ interface Course {
   department: string;
   duration: string;
   semesters: number;
-  description: string;
   credits: number;
+  description: string;
+}
+
+interface SyllabusItem {
+  id: string;
+  courseId: string;
+  unitNumber: number;
+  title: string;
+  description: string;
+}
+
+interface StudyActivity {
+  id: string;
+  date: string;
+  batch: string;
+  courseId: string;
+  activities: string[];
+  assignmentSubject: string;
+  assignmentTopic: string;
+  remarks: string;
+  teacherId: string;
 }
 
 interface TimeTableSlot {
@@ -60,50 +84,95 @@ const TIME_SLOTS = [
 
 export const Courses: React.FC = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'courses' | 'timetable'>('courses');
+  const [activeTab, setActiveTab] = useState<'courses' | 'timetable' | 'syllabus' | 'studylog'>('courses');
   const [courses, setCourses] = useState<Course[]>([]);
   const [timetable, setTimetable] = useState<TimeTableSlot[]>([]);
+  const [syllabus, setSyllabus] = useState<SyllabusItem[]>([]);
+  const [studyLogs, setStudyLogs] = useState<StudyActivity[]>([]);
+  
   const [isCourseModalOpen, setIsCourseModalOpen] = useState(false);
   const [isTimetableModalOpen, setIsTimetableModalOpen] = useState(false);
+  const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false);
+  const [isStudyLogModalOpen, setIsStudyLogModalOpen] = useState(false);
+  
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [editingSlot, setEditingSlot] = useState<TimeTableSlot | null>(null);
+  const [editingSyllabus, setEditingSyllabus] = useState<SyllabusItem | null>(null);
+  const [editingStudyLog, setEditingStudyLog] = useState<StudyActivity | null>(null);
+  
   const [searchQuery, setSearchQuery] = useState('');
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
 
   // Form states
   const [courseForm, setCourseForm] = useState<Partial<Course>>({});
   const [slotForm, setSlotForm] = useState<Partial<TimeTableSlot>>({});
+  const [syllabusForm, setSyllabusForm] = useState<Partial<SyllabusItem>>({});
+  const [studyLogForm, setStudyLogForm] = useState<Partial<StudyActivity>>({
+    activities: ['', '', '', '', '']
+  });
 
   useEffect(() => {
-    const savedCourses = localStorage.getItem('edunexus_courses');
-    const savedTimetable = localStorage.getItem('edunexus_timetable');
-    
-    if (savedCourses) setCourses(JSON.parse(savedCourses));
-    else {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    const [coursesRes, syllabusRes, studyLogsRes, timetableRes] = await Promise.all([
+      supabase.from('courses').select('*'),
+      supabase.from('syllabus').select('*'),
+      supabase.from('study_activities').select('*'),
+      supabase.from('timetable').select('*')
+    ]);
+
+    if (coursesRes.data) setCourses(coursesRes.data);
+    if (syllabusRes.data) {
+      setSyllabus(syllabusRes.data.map(s => ({
+        id: s.id,
+        courseId: s.course_id,
+        unitNumber: s.unit_number,
+        title: s.title,
+        description: s.description
+      })));
+    }
+    if (studyLogsRes.data) {
+      setStudyLogs(studyLogsRes.data.map(s => ({
+        id: s.id,
+        date: s.date,
+        batch: s.batch,
+        courseId: s.course_id,
+        activities: s.activities,
+        assignmentSubject: s.assignment_subject,
+        assignmentTopic: s.assignment_topic,
+        remarks: s.remarks,
+        teacherId: s.teacher_id
+      })));
+    }
+    if (timetableRes.data) {
+      setTimetable(timetableRes.data.map(t => ({
+        id: t.id,
+        courseId: t.course_id,
+        subject: t.subject,
+        faculty: t.faculty,
+        room: t.room,
+        day: t.day,
+        startTime: t.start_time,
+        endTime: t.end_time
+      })));
+    }
+
+    // Fallback to initial data if no courses in Supabase
+    if (!coursesRes.data || coursesRes.data.length === 0) {
       const initialCourses = [
         { id: '1', name: 'Computer Science & Engineering', code: 'CSE', department: 'Engineering', duration: '4 Years', semesters: 8, credits: 160, description: 'Core computer science principles and applications.' },
         { id: '2', name: 'Information Technology', code: 'IT', department: 'Engineering', duration: '4 Years', semesters: 8, credits: 158, description: 'Focus on information systems and network technologies.' },
         { id: '3', name: 'Electronics & Communication', code: 'ECE', department: 'Engineering', duration: '4 Years', semesters: 8, credits: 162, description: 'Study of electronic circuits and communication systems.' }
       ];
       setCourses(initialCourses);
-      localStorage.setItem('edunexus_courses', JSON.stringify(initialCourses));
+      await supabase.from('courses').insert(initialCourses);
     }
-
-    if (savedTimetable) setTimetable(JSON.parse(savedTimetable));
-  }, []);
-
-  const saveCourses = (newCourses: Course[]) => {
-    setCourses(newCourses);
-    localStorage.setItem('edunexus_courses', JSON.stringify(newCourses));
   };
 
-  const saveTimetable = (newTimetable: TimeTableSlot[]) => {
-    setTimetable(newTimetable);
-    localStorage.setItem('edunexus_timetable', JSON.stringify(newTimetable));
-  };
-
-  const handleAddCourse = () => {
-    const newCourse: Course = {
+  const handleAddCourse = async () => {
+    const data = {
       id: editingCourse?.id || Math.random().toString(36).substr(2, 9),
       name: courseForm.name || '',
       code: courseForm.code || '',
@@ -114,51 +183,136 @@ export const Courses: React.FC = () => {
       description: courseForm.description || ''
     };
 
+    let error;
     if (editingCourse) {
-      saveCourses(courses.map(c => c.id === editingCourse.id ? newCourse : c));
+      const { error: err } = await supabase.from('courses').update(data).eq('id', editingCourse.id);
+      error = err;
     } else {
-      saveCourses([...courses, newCourse]);
+      const { error: err } = await supabase.from('courses').insert(data);
+      error = err;
     }
-    setIsCourseModalOpen(false);
-    setEditingCourse(null);
-    setCourseForm({});
+
+    if (!error) {
+      fetchData();
+      setIsCourseModalOpen(false);
+      setEditingCourse(null);
+      setCourseForm({});
+    }
   };
 
-  const handleDeleteCourse = (id: string) => {
+  const handleDeleteCourse = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this course?')) {
-      saveCourses(courses.filter(c => c.id !== id));
+      const { error } = await supabase.from('courses').delete().eq('id', id);
+      if (!error) fetchData();
     }
   };
 
-  const handleAddSlot = () => {
-    const newSlot: TimeTableSlot = {
-      id: editingSlot?.id || Math.random().toString(36).substr(2, 9),
-      courseId: slotForm.courseId || '',
+  const handleAddSlot = async () => {
+    const data = {
+      course_id: slotForm.courseId || '',
       subject: slotForm.subject || '',
       faculty: slotForm.faculty || '',
       room: slotForm.room || '',
       day: slotForm.day || '',
-      startTime: slotForm.startTime || '',
-      endTime: slotForm.endTime || ''
+      start_time: slotForm.startTime || '',
+      end_time: slotForm.endTime || ''
     };
 
+    let error;
     if (editingSlot) {
-      saveTimetable(timetable.map(s => s.id === editingSlot.id ? newSlot : s));
+      const { error: err } = await supabase.from('timetable').update(data).eq('id', editingSlot.id);
+      error = err;
     } else {
-      saveTimetable([...timetable, newSlot]);
+      const { error: err } = await supabase.from('timetable').insert(data);
+      error = err;
     }
-    setIsTimetableModalOpen(false);
-    setEditingSlot(null);
-    setSlotForm({});
+
+    if (!error) {
+      fetchData();
+      setIsTimetableModalOpen(false);
+      setEditingSlot(null);
+      setSlotForm({});
+    }
   };
 
-  const handleDeleteSlot = (id: string) => {
-    saveTimetable(timetable.filter(s => s.id !== id));
+  const handleDeleteSlot = async (id: string) => {
+    if (window.confirm('Are you sure you want to delete this slot?')) {
+      const { error } = await supabase.from('timetable').delete().eq('id', id);
+      if (!error) fetchData();
+    }
+  };
+
+  const handleSaveSyllabus = async () => {
+    const data = {
+      course_id: syllabusForm.courseId,
+      unit_number: Number(syllabusForm.unitNumber),
+      title: syllabusForm.title,
+      description: syllabusForm.description
+    };
+
+    let error;
+    if (editingSyllabus) {
+      const { error: err } = await supabase.from('syllabus').update(data).eq('id', editingSyllabus.id);
+      error = err;
+    } else {
+      const { error: err } = await supabase.from('syllabus').insert(data);
+      error = err;
+    }
+
+    if (!error) {
+      fetchData();
+      setIsSyllabusModalOpen(false);
+      setEditingSyllabus(null);
+      setSyllabusForm({});
+    }
+  };
+
+  const handleDeleteSyllabus = async (id: string) => {
+    if (window.confirm('Are you sure you want to delete this syllabus item?')) {
+      const { error } = await supabase.from('syllabus').delete().eq('id', id);
+      if (!error) fetchData();
+    }
+  };
+
+  const handleSaveStudyLog = async () => {
+    const data = {
+      date: studyLogForm.date || new Date().toISOString().split('T')[0],
+      batch: studyLogForm.batch,
+      course_id: studyLogForm.courseId,
+      activities: studyLogForm.activities?.filter(a => a.trim() !== '') || [],
+      assignment_subject: studyLogForm.assignmentSubject,
+      assignment_topic: studyLogForm.assignmentTopic,
+      remarks: studyLogForm.remarks,
+      teacher_id: user?.id
+    };
+
+    let error;
+    if (editingStudyLog) {
+      const { error: err } = await supabase.from('study_activities').update(data).eq('id', editingStudyLog.id);
+      error = err;
+    } else {
+      const { error: err } = await supabase.from('study_activities').insert(data);
+      error = err;
+    }
+
+    if (!error) {
+      fetchData();
+      setIsStudyLogModalOpen(false);
+      setEditingStudyLog(null);
+      setStudyLogForm({ activities: ['', '', '', '', ''] });
+    }
+  };
+
+  const handleDeleteStudyLog = async (id: string) => {
+    if (window.confirm('Are you sure you want to delete this study log?')) {
+      const { error } = await supabase.from('study_activities').delete().eq('id', id);
+      if (!error) fetchData();
+    }
   };
 
   const generateAITimetable = () => {
     setIsGeneratingAI(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       const subjects = ['Data Structures', 'Algorithms', 'Operating Systems', 'Database Systems', 'Computer Networks', 'Software Engineering'];
       const faculties = ['Dr. Smith', 'Prof. Johnson', 'Dr. Williams', 'Prof. Brown', 'Dr. Jones'];
       const rooms = ['Room 101', 'Room 102', 'Lab 1', 'Lab 2', 'Seminar Hall'];
@@ -194,7 +348,18 @@ export const Courses: React.FC = () => {
         });
       });
       
-      saveTimetable(newSlots);
+      const formattedSlots = newSlots.map(slot => ({
+        course_id: slot.courseId,
+        subject: slot.subject,
+        faculty: slot.faculty,
+        room: slot.room,
+        day: slot.day,
+        start_time: slot.startTime,
+        end_time: slot.endTime
+      }));
+      
+      const { error } = await supabase.from('timetable').insert(formattedSlots);
+      if (!error) fetchData();
       setIsGeneratingAI(false);
     }, 2000);
   };
@@ -225,7 +390,7 @@ export const Courses: React.FC = () => {
               <Plus className="w-5 h-5" />
               Add New Course
             </button>
-          ) : (
+          ) : activeTab === 'timetable' ? (
             <div className="flex items-center gap-3">
               <button 
                 onClick={generateAITimetable}
@@ -251,6 +416,30 @@ export const Courses: React.FC = () => {
                 Add Slot
               </button>
             </div>
+          ) : activeTab === 'syllabus' ? (
+            <button 
+              onClick={() => {
+                setEditingSyllabus(null);
+                setSyllabusForm({});
+                setIsSyllabusModalOpen(true);
+              }}
+              className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-2xl font-bold hover:bg-primary/90 transition-all shadow-lg shadow-primary/20"
+            >
+              <Plus className="w-5 h-5" />
+              Add Syllabus Item
+            </button>
+          ) : (
+            <button 
+              onClick={() => {
+                setEditingStudyLog(null);
+                setStudyLogForm({ activities: ['', '', '', '', ''] });
+                setIsStudyLogModalOpen(true);
+              }}
+              className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-2xl font-bold hover:bg-primary/90 transition-all shadow-lg shadow-primary/20"
+            >
+              <Plus className="w-5 h-5" />
+              Log Study Activity
+            </button>
           )}
         </div>
       </div>
@@ -276,6 +465,26 @@ export const Courses: React.FC = () => {
         >
           <Calendar className="w-4 h-4" />
           Time Table
+        </button>
+        <button 
+          onClick={() => setActiveTab('syllabus')}
+          className={cn(
+            "px-8 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
+            activeTab === 'syllabus' ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-primary"
+          )}
+        >
+          <ClipboardList className="w-4 h-4" />
+          Syllabus
+        </button>
+        <button 
+          onClick={() => setActiveTab('studylog')}
+          className={cn(
+            "px-8 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
+            activeTab === 'studylog' ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-primary"
+          )}
+        >
+          <History className="w-4 h-4" />
+          Study Log
         </button>
       </div>
 
@@ -366,7 +575,7 @@ export const Courses: React.FC = () => {
               ))}
             </div>
           </motion.div>
-        ) : (
+        ) : activeTab === 'timetable' ? (
           <motion.div 
             key="timetable"
             initial={{ opacity: 0, y: 20 }}
@@ -453,6 +662,167 @@ export const Courses: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+            </div>
+          </motion.div>
+        ) : activeTab === 'syllabus' ? (
+          <motion.div 
+            key="syllabus"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="space-y-6"
+          >
+            <div className="grid grid-cols-1 gap-6">
+              {courses.map(course => {
+                const courseSyllabus = syllabus.filter(s => s.courseId === course.id).sort((a, b) => a.unitNumber - b.unitNumber);
+                return (
+                  <div key={course.id} className="bg-white rounded-3xl border border-primary/10 shadow-sm overflow-hidden">
+                    <div className="p-6 bg-primary/5 border-b border-primary/10 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-primary shadow-sm">
+                          <BookOpen className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="font-black text-slate-800">{course.name}</h3>
+                          <p className="text-xs text-slate-500 font-bold">{course.code}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="p-6">
+                      {courseSyllabus.length > 0 ? (
+                        <div className="space-y-4">
+                          {courseSyllabus.map(item => (
+                            <div key={item.id} className="flex items-start gap-4 p-4 bg-slate-50 rounded-2xl group">
+                              <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-primary font-black text-sm shadow-sm shrink-0">
+                                {item.unitNumber}
+                              </div>
+                              <div className="flex-1">
+                                <h4 className="font-bold text-slate-800">{item.title}</h4>
+                                <p className="text-sm text-slate-500 mt-1">{item.description}</p>
+                              </div>
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button 
+                                  onClick={() => {
+                                    setEditingSyllabus(item);
+                                    setSyllabusForm(item);
+                                    setIsSyllabusModalOpen(true);
+                                  }}
+                                  className="p-2 text-slate-400 hover:text-primary hover:bg-white rounded-lg transition-all"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteSyllabus(item.id)}
+                                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-white rounded-lg transition-all"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="py-12 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-100 rounded-2xl">
+                          <ClipboardList className="w-12 h-12 mb-4 opacity-20" />
+                          <p className="font-bold">No syllabus items added yet.</p>
+                          <button 
+                            onClick={() => {
+                              setEditingSyllabus(null);
+                              setSyllabusForm({ courseId: course.id });
+                              setIsSyllabusModalOpen(true);
+                            }}
+                            className="mt-4 text-primary font-bold hover:underline"
+                          >
+                            Add First Unit
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div 
+            key="studylog"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="space-y-6"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {studyLogs.map((log, index) => {
+                const course = courses.find(c => c.id === log.courseId);
+                return (
+                  <motion.div
+                    key={log.id}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: index * 0.05 }}
+                    className="bg-white rounded-3xl border border-primary/10 shadow-sm overflow-hidden hover:shadow-xl transition-all group"
+                  >
+                    <div className="p-6 bg-primary/5 border-b border-primary/10 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-primary shadow-sm">
+                          <History className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="font-black text-slate-800">{formatDate(log.date)}</h3>
+                          <p className="text-xs text-slate-500 font-bold">{log.batch} • {course?.name}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button 
+                          onClick={() => {
+                            setEditingStudyLog(log);
+                            setStudyLogForm(log);
+                            setIsStudyLogModalOpen(true);
+                          }}
+                          className="p-2 text-slate-400 hover:text-primary hover:bg-white rounded-lg transition-all"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteStudyLog(log.id)}
+                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-white rounded-lg transition-all"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="p-6 space-y-4">
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Today's Study Activities</p>
+                        <div className="space-y-1.5">
+                          {log.activities.map((activity, i) => (
+                            <div key={i} className="flex items-center gap-3 text-sm text-slate-600 font-medium">
+                              <span className="w-5 h-5 bg-slate-100 rounded-md flex items-center justify-center text-[10px] font-black text-slate-400 shrink-0">{i + 1}</span>
+                              {activity}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-50">
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase">Assignment Subject</p>
+                          <p className="text-sm font-bold text-slate-700">{log.assignmentSubject || 'N/A'}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase">Assignment Topic</p>
+                          <p className="text-sm font-bold text-slate-700">{log.assignmentTopic || 'N/A'}</p>
+                        </div>
+                      </div>
+                      {log.remarks && (
+                        <div className="pt-4 border-t border-slate-50">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase">Remarks</p>
+                          <p className="text-sm text-slate-600 italic mt-1">"{log.remarks}"</p>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
             </div>
           </motion.div>
         )}
@@ -678,6 +1048,222 @@ export const Courses: React.FC = () => {
               >
                 <Save className="w-5 h-5" />
                 {editingSlot ? 'Update Slot' : 'Save Slot'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Syllabus Modal */}
+      {isSyllabusModalOpen && (
+        <div className="fixed inset-0 bg-primary/20 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-[32px] shadow-2xl w-full max-w-xl overflow-hidden"
+          >
+            <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-primary/5">
+              <div>
+                <h2 className="text-2xl font-black text-primary">{editingSyllabus ? 'Edit Syllabus Item' : 'Add Syllabus Item'}</h2>
+                <p className="text-slate-500 text-sm">Define a new unit for the course syllabus.</p>
+              </div>
+              <button 
+                onClick={() => setIsSyllabusModalOpen(false)}
+                className="p-2 hover:bg-white rounded-xl transition-colors"
+              >
+                <X className="w-6 h-6 text-slate-400" />
+              </button>
+            </div>
+            <div className="p-8 space-y-6">
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Course</label>
+                  <select 
+                    value={syllabusForm.courseId || ''}
+                    onChange={(e) => setSyllabusForm({...syllabusForm, courseId: e.target.value})}
+                    className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                  >
+                    <option value="">Select Course</option>
+                    {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Unit Number</label>
+                  <input 
+                    type="number" 
+                    value={syllabusForm.unitNumber || ''}
+                    onChange={(e) => setSyllabusForm({...syllabusForm, unitNumber: Number(e.target.value)})}
+                    placeholder="e.g. 1"
+                    className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Unit Title</label>
+                <input 
+                  type="text" 
+                  value={syllabusForm.title || ''}
+                  onChange={(e) => setSyllabusForm({...syllabusForm, title: e.target.value})}
+                  placeholder="e.g. Introduction to Computer Science"
+                  className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Description / Topics</label>
+                <textarea 
+                  rows={4}
+                  value={syllabusForm.description || ''}
+                  onChange={(e) => setSyllabusForm({...syllabusForm, description: e.target.value})}
+                  placeholder="List topics covered in this unit..."
+                  className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none"
+                />
+              </div>
+            </div>
+            <div className="p-8 bg-slate-50 flex items-center justify-end gap-3">
+              <button 
+                onClick={() => setIsSyllabusModalOpen(false)}
+                className="px-6 py-3 text-slate-500 font-bold hover:text-primary transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleSaveSyllabus}
+                className="flex items-center gap-2 px-8 py-3 bg-primary text-white rounded-2xl font-bold hover:bg-primary/90 transition-all shadow-lg shadow-primary/20"
+              >
+                <Save className="w-5 h-5" />
+                {editingSyllabus ? 'Update Item' : 'Save Item'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Study Log Modal */}
+      {isStudyLogModalOpen && (
+        <div className="fixed inset-0 bg-primary/20 backdrop-blur-sm z-50 flex items-center justify-center p-6 overflow-y-auto">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-[32px] shadow-2xl w-full max-w-2xl my-auto overflow-hidden"
+          >
+            <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-primary/5">
+              <div>
+                <h2 className="text-2xl font-black text-primary">Today's Study Activities</h2>
+                <p className="text-slate-500 text-sm">Log topics covered and assignments given.</p>
+              </div>
+              <button 
+                onClick={() => setIsStudyLogModalOpen(false)}
+                className="p-2 hover:bg-white rounded-xl transition-colors"
+              >
+                <X className="w-6 h-6 text-slate-400" />
+              </button>
+            </div>
+            <div className="p-8 space-y-6 max-h-[70vh] overflow-y-auto">
+              <div className="grid grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Date</label>
+                  <input 
+                    type="date" 
+                    value={studyLogForm.date || new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setStudyLogForm({...studyLogForm, date: e.target.value})}
+                    className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Batch</label>
+                  <input 
+                    type="text" 
+                    value={studyLogForm.batch || ''}
+                    onChange={(e) => setStudyLogForm({...studyLogForm, batch: e.target.value})}
+                    placeholder="e.g. 12:20"
+                    className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Course</label>
+                  <select 
+                    value={studyLogForm.courseId || ''}
+                    onChange={(e) => setStudyLogForm({...studyLogForm, courseId: e.target.value})}
+                    className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                  >
+                    <option value="">Select Course</option>
+                    {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Activities Covered</label>
+                <div className="space-y-3">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <div key={i} className="flex items-center gap-3">
+                      <span className="w-8 h-8 bg-primary/5 rounded-lg flex items-center justify-center text-xs font-black text-primary shrink-0">{i + 1})</span>
+                      <input 
+                        type="text" 
+                        value={studyLogForm.activities?.[i] || ''}
+                        onChange={(e) => {
+                          const newActivities = [...(studyLogForm.activities || ['', '', '', '', ''])];
+                          newActivities[i] = e.target.value;
+                          setStudyLogForm({...studyLogForm, activities: newActivities});
+                        }}
+                        placeholder={`Activity ${i + 1}...`}
+                        className="w-full px-4 py-2.5 bg-background border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-6 border-t border-slate-100">
+                <h3 className="text-sm font-black text-slate-800 mb-4">Assignment Details</h3>
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Subject</label>
+                    <input 
+                      type="text" 
+                      value={studyLogForm.assignmentSubject || ''}
+                      onChange={(e) => setStudyLogForm({...studyLogForm, assignmentSubject: e.target.value})}
+                      placeholder="e.g. Child Health Nursing"
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Topic</label>
+                    <input 
+                      type="text" 
+                      value={studyLogForm.assignmentTopic || ''}
+                      onChange={(e) => setStudyLogForm({...studyLogForm, assignmentTopic: e.target.value})}
+                      placeholder="e.g. Growth & Development"
+                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Remarks / Authority's Signature</label>
+                <textarea 
+                  rows={2}
+                  value={studyLogForm.remarks || ''}
+                  onChange={(e) => setStudyLogForm({...studyLogForm, remarks: e.target.value})}
+                  placeholder="Enter any additional remarks..."
+                  className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none"
+                />
+              </div>
+            </div>
+            <div className="p-8 bg-slate-50 flex items-center justify-end gap-3">
+              <button 
+                onClick={() => setIsStudyLogModalOpen(false)}
+                className="px-6 py-3 text-slate-500 font-bold hover:text-primary transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleSaveStudyLog}
+                className="flex items-center gap-2 px-8 py-3 bg-primary text-white rounded-2xl font-bold hover:bg-primary/90 transition-all shadow-lg shadow-primary/20"
+              >
+                <Save className="w-5 h-5" />
+                {editingStudyLog ? 'Update Log' : 'Save Log'}
               </button>
             </div>
           </motion.div>

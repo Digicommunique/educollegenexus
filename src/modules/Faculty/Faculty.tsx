@@ -16,10 +16,13 @@ import {
   FileText,
   ShieldAlert,
   Heart,
-  Briefcase
+  Briefcase,
+  Edit2,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
+import { supabase } from '../../lib/supabase';
 
 interface FacultyMember {
   id: string;
@@ -29,6 +32,10 @@ interface FacultyMember {
   branch: string;
   designation: string;
   status: 'Active' | 'On Leave' | 'Inactive';
+  photoUrl?: string;
+  staffDocsUrl?: string;
+  nomineeDocsUrl?: string;
+  signatureUrl?: string;
 }
 
 const MOCK_FACULTY: FacultyMember[] = [
@@ -42,6 +49,92 @@ export const Faculty: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [facultyList, setFacultyList] = useState<FacultyMember[]>([]);
+
+  const [academicSettings, setAcademicSettings] = useState<any>({
+    castes: ['General', 'OBC', 'SC', 'ST', 'EWS'],
+    religions: ['Hinduism', 'Islam', 'Christianity', 'Sikhism', 'Buddhism', 'Jainism'],
+  });
+
+  const indianStates = [
+    'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
+    'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka',
+    'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram',
+    'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu',
+    'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+    'Andaman and Nicobar Islands', 'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu',
+    'Delhi', 'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry'
+  ].sort();
+
+  useEffect(() => {
+    fetchAcademicSettings();
+    fetchFaculty();
+  }, []);
+
+  const fetchAcademicSettings = async () => {
+    const { data, error } = await supabase.from('app_settings').select('*').eq('key', 'academic').single();
+    if (error) {
+      console.warn('Error fetching academic settings, using defaults:', error);
+      return;
+    }
+    if (data && data.value) {
+      setAcademicSettings((prev: any) => ({
+        ...prev,
+        ...data.value
+      }));
+    }
+  };
+
+  const fetchFaculty = async () => {
+    const { data, error } = await supabase
+      .from('faculty')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching faculty:', error);
+      const saved = localStorage.getItem('edu_nexus_faculty');
+      setFacultyList(saved ? JSON.parse(saved) : MOCK_FACULTY);
+    } else if (data) {
+      const formattedFaculty: FacultyMember[] = data.map(f => ({
+        id: f.id,
+        name: f.name,
+        email: f.email || '',
+        phone: f.phone || '',
+        branch: f.branch || '',
+        designation: f.designation || '',
+        status: f.status as 'Active' | 'On Leave' | 'Inactive',
+        photoUrl: f.photo_url,
+        staffDocsUrl: f.staff_docs_url,
+        nomineeDocsUrl: f.nominee_docs_url,
+        signatureUrl: f.signature_url
+      }));
+      setFacultyList(formattedFaculty);
+      localStorage.setItem('edu_nexus_faculty', JSON.stringify(formattedFaculty));
+    }
+  };
+
+  const addFacultyToSupabase = async (faculty: FacultyMember) => {
+    const { error } = await supabase.from('faculty').insert([{
+      id: faculty.id,
+      name: faculty.name,
+      email: faculty.email,
+      phone: faculty.phone,
+      branch: faculty.branch,
+      designation: faculty.designation,
+      photo_url: (faculty as any).photoUrl,
+      staff_docs_url: (faculty as any).staffDocsUrl,
+      nominee_docs_url: (faculty as any).nomineeDocsUrl,
+      signature_url: (faculty as any).signatureUrl,
+      status: faculty.status
+    }]);
+    if (error) console.error('Error adding faculty to Supabase:', error);
+  };
+
+  const deleteFacultyFromSupabase = async (id: string) => {
+    const { error } = await supabase.from('faculty').delete().eq('id', id);
+    if (error) console.error('Error deleting faculty from Supabase:', error);
+  };
 
   // Registration Form State
   const [formData, setFormData] = useState({
@@ -71,6 +164,10 @@ export const Faculty: React.FC = () => {
     emergencyAddress: '',
     emergencyPhone: '',
     allergy: '',
+    photoUrl: '',
+    staffDocsUrl: '',
+    nomineeDocsUrl: '',
+    signatureUrl: '',
   });
 
   const [generatedId, setGeneratedId] = useState('');
@@ -88,19 +185,51 @@ export const Faculty: React.FC = () => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     
+    const newStaff: FacultyMember = {
+      id: generatedId,
+      name: `${formData.title} ${formData.firstName} ${formData.surname}`,
+      email: formData.email,
+      phone: formData.phone,
+      branch: formData.branch,
+      designation: 'Staff', // Default
+      status: 'Active',
+      photoUrl: formData.photoUrl,
+      staffDocsUrl: formData.staffDocsUrl,
+      nomineeDocsUrl: formData.nomineeDocsUrl,
+      signatureUrl: formData.signatureUrl,
+    } as any;
+
+    await addFacultyToSupabase(newStaff);
+    const newList = [...facultyList, newStaff];
+    setFacultyList(newList);
+    localStorage.setItem('edu_nexus_faculty', JSON.stringify(newList));
+    
+    setIsSubmitting(false);
+    setShowSuccess(true);
     setTimeout(() => {
-      setIsSubmitting(false);
-      setShowSuccess(true);
-      setTimeout(() => {
-        setShowSuccess(false);
-        setView('list');
-      }, 2000);
-    }, 1500);
+      setShowSuccess(false);
+      setView('list');
+    }, 2000);
   };
+
+  const handleDelete = async (id: string) => {
+    if (window.confirm('Are you sure you want to delete this staff member?')) {
+      await deleteFacultyFromSupabase(id);
+      const newList = facultyList.filter(f => f.id !== id);
+      setFacultyList(newList);
+      localStorage.setItem('edu_nexus_faculty', JSON.stringify(newList));
+    }
+  };
+
+  const filteredFaculty = facultyList.filter(staff => 
+    staff.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    staff.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    staff.branch.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <div className="space-y-8">
@@ -176,7 +305,7 @@ export const Faculty: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {MOCK_FACULTY.map((staff) => (
+                  {filteredFaculty.map((staff) => (
                     <tr key={staff.id} className="hover:bg-primary/5 transition-colors group">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
@@ -218,9 +347,17 @@ export const Faculty: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <button className="p-2 hover:bg-primary/10 rounded-lg transition-colors text-slate-400 hover:text-primary">
-                          <MoreVertical className="w-5 h-5" />
-                        </button>
+                        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button className="p-2 hover:bg-primary/10 rounded-lg text-primary transition-colors">
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => handleDelete(staff.id)}
+                            className="p-2 hover:bg-red-50 rounded-lg text-red-500 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -403,25 +540,31 @@ export const Faculty: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Religion</label>
-                  <input 
-                    type="text" 
+                  <select 
                     name="religion"
                     value={formData.religion}
                     onChange={handleInputChange}
-                    placeholder="Enter religion"
                     className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                  />
+                  >
+                    <option value="">Select Religion</option>
+                    {academicSettings.religions.map((r: string) => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Caste</label>
-                  <input 
-                    type="text" 
+                  <select 
                     name="caste"
                     value={formData.caste}
                     onChange={handleInputChange}
-                    placeholder="Enter caste"
                     className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                  />
+                  >
+                    <option value="">Select Caste</option>
+                    {academicSettings.castes.map((c: string) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Category</label>
@@ -467,10 +610,9 @@ export const Faculty: React.FC = () => {
                       className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
                     >
                       <option value="">Select State</option>
-                      <option>Maharashtra</option>
-                      <option>Delhi</option>
-                      <option>Karnataka</option>
-                      <option>Gujarat</option>
+                      {indianStates.map(state => (
+                        <option key={state} value={state}>{state}</option>
+                      ))}
                     </select>
                   </div>
                   <div className="space-y-2">
@@ -491,9 +633,33 @@ export const Faculty: React.FC = () => {
               <div className="space-y-4">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Upload Staff Photo</label>
                 <div className="flex items-center gap-6">
-                  <div className="w-32 h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group">
-                    <Camera className="w-8 h-8 mb-2 group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-bold">Upload Photo</span>
+                  <div 
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = 'image/*';
+                      input.onchange = (e: any) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            setFormData(prev => ({ ...prev, photoUrl: event.target?.result as string }));
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      };
+                      input.click();
+                    }}
+                    className="w-32 h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group overflow-hidden"
+                  >
+                    {formData.photoUrl ? (
+                      <img src={formData.photoUrl} alt="Staff" className="w-full h-full object-cover" />
+                    ) : (
+                      <>
+                        <Camera className="w-8 h-8 mb-2 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-bold">Upload Photo</span>
+                      </>
+                    )}
                   </div>
                   <div className="text-xs text-slate-500 space-y-1">
                     <p className="font-bold text-primary">Requirements:</p>
@@ -684,25 +850,106 @@ export const Faculty: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div className="space-y-4">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Staff Documents</label>
-                  <div className="h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group">
-                    <Upload className="w-6 h-6 mb-2 group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-bold">Upload (PDF/JPG)</span>
+                  <div 
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = '.pdf,image/*';
+                      input.onchange = (e: any) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            setFormData(prev => ({ ...prev, staffDocsUrl: event.target?.result as string }));
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      };
+                      input.click();
+                    }}
+                    className="h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group overflow-hidden"
+                  >
+                    {formData.staffDocsUrl ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <CheckCircle2 className="w-8 h-8 text-green-500" />
+                        <span className="text-[10px] font-bold text-green-600">Uploaded</span>
+                      </div>
+                    ) : (
+                      <>
+                        <Upload className="w-6 h-6 mb-2 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-bold">Upload (PDF/JPG)</span>
+                      </>
+                    )}
                   </div>
                   <p className="text-[10px] text-slate-400 text-center">ID Proofs, Experience Certs</p>
                 </div>
                 <div className="space-y-4">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Parent/Nominee Documents</label>
-                  <div className="h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group">
-                    <Upload className="w-6 h-6 mb-2 group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-bold">Upload (PDF/JPG)</span>
+                  <div 
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = '.pdf,image/*';
+                      input.onchange = (e: any) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            setFormData(prev => ({ ...prev, nomineeDocsUrl: event.target?.result as string }));
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      };
+                      input.click();
+                    }}
+                    className="h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group overflow-hidden"
+                  >
+                    {formData.nomineeDocsUrl ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <CheckCircle2 className="w-8 h-8 text-green-500" />
+                        <span className="text-[10px] font-bold text-green-600">Uploaded</span>
+                      </div>
+                    ) : (
+                      <>
+                        <Upload className="w-6 h-6 mb-2 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-bold">Upload (PDF/JPG)</span>
+                      </>
+                    )}
                   </div>
                   <p className="text-[10px] text-slate-400 text-center">Nominee ID Proofs</p>
                 </div>
                 <div className="space-y-4">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Staff Signature</label>
-                  <div className="h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group">
-                    <Upload className="w-6 h-6 mb-2 group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-bold">Upload Signature</span>
+                  <div 
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = 'image/*';
+                      input.onchange = (e: any) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            setFormData(prev => ({ ...prev, signatureUrl: event.target?.result as string }));
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      };
+                      input.click();
+                    }}
+                    className="h-32 bg-background border-2 border-dashed border-primary/20 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary/40 hover:text-primary transition-all cursor-pointer group overflow-hidden"
+                  >
+                    {formData.signatureUrl ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <CheckCircle2 className="w-8 h-8 text-green-500" />
+                        <span className="text-[10px] font-bold text-green-600">Uploaded</span>
+                      </div>
+                    ) : (
+                      <>
+                        <Upload className="w-6 h-6 mb-2 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-bold">Upload Signature</span>
+                      </>
+                    )}
                   </div>
                   <p className="text-[10px] text-slate-400 text-center">Clear image of signature</p>
                 </div>

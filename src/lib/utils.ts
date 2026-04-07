@@ -16,11 +16,10 @@ export function formatDate(date: string | Date) {
   try {
     const d = new Date(date);
     if (isNaN(d.getTime())) return 'Invalid Date';
-    return new Intl.DateTimeFormat('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    }).format(d);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
   } catch (e) {
     console.error('Error formatting date', e);
     return 'Invalid Date';

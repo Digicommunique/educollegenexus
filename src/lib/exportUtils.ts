@@ -19,8 +19,12 @@ export const exportToPDF = (title: string, headers: string[], data: any[][], fil
   doc.setTextColor(100);
   
   // Add date
-  const date = new Date().toLocaleDateString();
-  doc.text(`Generated on: ${date}`, 14, 30);
+  const d = new Date();
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  const dateStr = `${day}/${month}/${year}`;
+  doc.text(`Generated on: ${dateStr}`, 14, 30);
   
   // Add table
   doc.autoTable({

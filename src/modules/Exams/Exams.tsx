@@ -23,6 +23,7 @@ import {
   FileSearch
 } from 'lucide-react';
 import { cn, formatDate } from '../../lib/utils';
+import { supabase } from '../../lib/supabase';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../../hooks/useAuth';
 import { exportToPDF, exportToExcel } from '../../lib/exportUtils';
@@ -46,10 +47,7 @@ interface StudentMark {
 
 export const Exams: React.FC = () => {
   const { user } = useAuth();
-  const [exams, setExams] = useState(() => {
-    const saved = localStorage.getItem('edu_nexus_exams');
-    return saved ? JSON.parse(saved) : EXAMS;
-  });
+  const [exams, setExams] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'schedule' | 'evaluation' | 'results'>('schedule');
   const [activeView, setActiveView] = useState<'list' | 'take' | 'evaluate'>('list');
   const [selectedExam, setSelectedExam] = useState<any>(null);
@@ -61,6 +59,7 @@ export const Exams: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evaluationMarks, setEvaluationMarks] = useState<StudentMark[]>([]);
+  const [papers, setPapers] = useState<any[]>([]);
   
   const [formData, setFormData] = useState({
     title: '',
@@ -69,24 +68,57 @@ export const Exams: React.FC = () => {
     date: '',
     time: '',
     duration: '120',
+    paperId: ''
   });
 
   const [linkedPaper, setLinkedPaper] = useState<any>(null);
 
   useEffect(() => {
-    const savedResults = localStorage.getItem('edunexus_exam_results');
-    if (savedResults) {
-      setResults(JSON.parse(savedResults));
-    } else {
-      const initialResults = [
-        { id: 'RES001', studentId: 'STU001', studentName: 'Rahul Sharma', examId: 'EX001', marks: 85, totalMarks: 100, status: 'PASSED' },
-        { id: 'RES002', studentId: 'STU002', studentName: 'Priya Patel', examId: 'EX001', marks: 42, totalMarks: 100, status: 'FAILED' },
-        { id: 'RES003', studentId: 'STU003', studentName: 'Amit Kumar', examId: 'EX002', marks: 0, totalMarks: 100, status: 'PENDING', scannedSheetUrl: 'https://picsum.photos/seed/sheet1/800/1200' },
-      ];
-      setResults(initialResults);
-      localStorage.setItem('edunexus_exam_results', JSON.stringify(initialResults));
-    }
+    fetchExams();
+    fetchResults();
+    fetchPapers();
   }, []);
+
+  const fetchPapers = async () => {
+    const { data, error } = await supabase.from('papers').select('*').order('title');
+    if (error) {
+      console.error('Error fetching papers:', error);
+      return;
+    }
+    if (data) setPapers(data);
+  };
+
+  const fetchExams = async () => {
+    const { data, error } = await supabase.from('exams').select('*, papers(*)').order('created_at', { ascending: false });
+    if (error) {
+      console.error('Error fetching exams:', error);
+      return;
+    }
+    if (data) {
+      setExams(data.map(e => ({
+        ...e,
+        students: e.students_count,
+        results: e.results_status,
+        paperId: e.paper_id
+      })));
+    }
+  };
+
+  const fetchResults = async () => {
+    const { data, error } = await supabase.from('results').select('*').order('created_at', { ascending: false });
+    if (error) {
+      console.error('Error fetching results:', error);
+      return;
+    }
+    if (data) {
+      setResults(data.map(r => ({
+        ...r,
+        studentName: r.student_name,
+        examId: r.exam_id,
+        totalMarks: r.total_marks
+      })));
+    }
+  };
 
   useEffect(() => {
     let timer: any;
@@ -111,25 +143,51 @@ export const Exams: React.FC = () => {
     setActiveView('take');
   };
 
-  const handleFinishExam = () => {
+  const handleFinishExam = async () => {
+    if (!selectedExam) return;
+
+    const resultData = {
+      id: `RES${Math.floor(1000 + Math.random() * 9000)}`,
+      student_id: user?.id || 'ANON',
+      student_name: user?.name || 'Anonymous Student',
+      exam_id: selectedExam.id,
+      marks: 0,
+      total_marks: selectedExam.papers?.total_marks || 100,
+      status: 'PENDING',
+      answers: { submissionDate: new Date().toISOString() },
+      is_published: false
+    };
+
+    const { error } = await supabase.from('results').insert(resultData);
+    
+    if (error) {
+      console.error('Error submitting exam:', error);
+      alert('Failed to submit exam. Please try again.');
+      return;
+    }
+
+    await fetchResults();
     setActiveView('list');
     alert('Exam submitted successfully!');
   };
 
-  const handleAutoEvaluate = () => {
+  const handleAutoEvaluate = async () => {
     setIsAutoEvaluating(true);
-    setTimeout(() => {
-      const newResults = results.map(res => {
-        if (res.status === 'PENDING') {
-          const randomMarks = Math.floor(Math.random() * 40) + 60;
-          return { ...res, marks: randomMarks, status: randomMarks >= 40 ? 'PASSED' : 'FAILED' as any };
-        }
-        return res;
-      });
-      setResults(newResults);
-      localStorage.setItem('edunexus_exam_results', JSON.stringify(newResults));
-      setIsAutoEvaluating(false);
-    }, 2000);
+    
+    const pendingResults = results.filter(r => r.status === 'PENDING');
+    
+    for (const res of pendingResults) {
+      const randomMarks = Math.floor(Math.random() * 40) + 60;
+      const status = randomMarks >= 40 ? 'PASSED' : 'FAILED';
+      
+      await supabase.from('results').update({
+        marks: randomMarks,
+        status: status
+      }).eq('id', res.id);
+    }
+
+    await fetchResults();
+    setIsAutoEvaluating(false);
   };
 
   const handleManualEvaluate = (result: any) => {
@@ -141,68 +199,82 @@ export const Exams: React.FC = () => {
   const canEvaluate = ['FACULTY', 'SUPER_ADMIN', 'COLLEGE_ADMIN', 'PRINCIPAL'].includes(user?.role || '');
   const canPublish = ['SUPER_ADMIN', 'COLLEGE_ADMIN', 'PRINCIPAL'].includes(user?.role || '');
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleInputChange = async (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => {
-      const newData = { ...prev, [name]: value };
-      
-      // Auto-fetch paper logic
-      if (name === 'course' || name === 'subject') {
-        const savedPapers = JSON.parse(localStorage.getItem('edu_nexus_papers') || '[]');
-        const paper = savedPapers.find((p: any) => 
-          p.course.toLowerCase().includes(newData.course.toLowerCase()) && 
-          p.subject.toLowerCase().includes(newData.subject.toLowerCase())
-        );
-        setLinkedPaper(paper || null);
-      }
-      
-      return newData;
-    });
+    const newData = { ...formData, [name]: value };
+    setFormData(newData);
+    
+    if (name === 'paperId') {
+      const paper = papers.find(p => p.id === value);
+      setLinkedPaper(paper || null);
+    }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     
-    // Simulate API call
-    setTimeout(() => {
-      const newExam = {
-        id: `EX${Math.floor(100 + Math.random() * 900)}`,
-        ...formData,
-        duration: parseInt(formData.duration),
-        status: 'UPCOMING' as const,
-        students: 0,
-        paperId: linkedPaper?.id,
-        results: 'PENDING'
-      };
-      
-      const updatedExams = [newExam, ...exams];
-      setExams(updatedExams);
-      localStorage.setItem('edu_nexus_exams', JSON.stringify(updatedExams));
+    const newExam = {
+      id: `EX${Math.floor(100 + Math.random() * 900)}`,
+      title: formData.title,
+      course: formData.course,
+      subject: formData.subject,
+      date: formData.date,
+      time: formData.time,
+      duration: parseInt(formData.duration),
+      status: 'UPCOMING',
+      students_count: 0,
+      paper_id: linkedPaper?.id,
+      results_status: 'PENDING'
+    };
+
+    const { error } = await supabase.from('exams').insert(newExam);
+    
+    if (error) {
+      console.error('Error scheduling exam:', error);
       setIsSubmitting(false);
-      setIsModalOpen(false);
-      setLinkedPaper(null);
-      setFormData({
-        title: '',
-        course: '',
-        subject: '',
-        date: '',
-        time: '',
-        duration: '120',
-      });
-    }, 1000);
+      return;
+    }
+
+    await fetchExams();
+    setIsSubmitting(false);
+    setIsModalOpen(false);
+    setLinkedPaper(null);
+    setFormData({
+      title: '',
+      course: '',
+      subject: '',
+      date: '',
+      time: '',
+      duration: '120',
+    });
   };
 
-  const startEvaluation = (exam: any) => {
+  const startEvaluation = async (exam: any) => {
     setSelectedExam(exam);
     setIsEvaluating(true);
     
-    // Load existing marks or create mock students
-    const savedMarks = JSON.parse(localStorage.getItem(`edu_nexus_marks_${exam.id}`) || '[]');
-    if (savedMarks.length > 0) {
-      setEvaluationMarks(savedMarks);
+    // Fetch results for this exam from Supabase
+    const { data, error } = await supabase
+      .from('results')
+      .select('*')
+      .eq('exam_id', exam.id);
+
+    if (error) {
+      console.error('Error fetching results for evaluation:', error);
+      return;
+    }
+
+    if (data && data.length > 0) {
+      setEvaluationMarks(data.map(r => ({
+        studentId: r.student_id,
+        studentName: r.student_name,
+        marksObtained: r.marks,
+        totalMarks: r.total_marks,
+        remarks: ''
+      })));
     } else {
-      // Mock students for evaluation
+      // Mock students if no results yet (for demo)
       const mockStudents: StudentMark[] = [
         { studentId: 'STU001', studentName: 'Siddharth Malhotra', marksObtained: 0, totalMarks: 100, remarks: '' },
         { studentId: 'STU002', studentName: 'Ananya Panday', marksObtained: 0, totalMarks: 100, remarks: '' },
@@ -212,18 +284,108 @@ export const Exams: React.FC = () => {
     }
   };
 
-  const saveEvaluation = () => {
-    localStorage.setItem(`edu_nexus_marks_${selectedExam.id}`, JSON.stringify(evaluationMarks));
+  const saveEvaluation = async () => {
+    for (const mark of evaluationMarks) {
+      const status = mark.marksObtained >= 40 ? 'PASSED' : 'FAILED';
+      
+      // Check if result exists
+      const { data: existing } = await supabase
+        .from('results')
+        .select('id')
+        .eq('student_id', mark.studentId)
+        .eq('exam_id', selectedExam.id)
+        .single();
+
+      if (existing) {
+        await supabase.from('results').update({
+          marks: mark.marksObtained,
+          status: status
+        }).eq('id', existing.id);
+      } else {
+        await supabase.from('results').insert({
+          id: `RES${Math.floor(1000 + Math.random() * 9000)}`,
+          student_id: mark.studentId,
+          student_name: mark.studentName,
+          exam_id: selectedExam.id,
+          marks: mark.marksObtained,
+          total_marks: mark.totalMarks,
+          status: status
+        });
+      }
+    }
+
+    await fetchResults();
     setIsEvaluating(false);
     setSelectedExam(null);
   };
 
-  const publishResults = (examId: string) => {
-    const updatedExams = exams.map((e: any) => 
-      e.id === examId ? { ...e, results: 'PUBLISHED' } : e
-    );
-    setExams(updatedExams);
-    localStorage.setItem('edu_nexus_exams', JSON.stringify(updatedExams));
+  const handleUploadScannedSheets = async () => {
+    // Mock upload logic
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.onchange = async (e: any) => {
+      const files = e.target.files;
+      if (!files.length) return;
+
+      setIsEvaluating(true);
+      // In a real app, we'd upload to Supabase Storage
+      // For now, we'll create mock results for students
+      const { data: students } = await supabase.from('students').select('*').limit(files.length);
+      
+      if (students) {
+        for (let i = 0; i < students.length; i++) {
+          const student = students[i];
+          const resId = `RES${Math.floor(1000 + Math.random() * 9000)}`;
+          await supabase.from('results').insert({
+            id: resId,
+            student_id: student.id,
+            student_name: student.name,
+            exam_id: exams[0]?.id || 'EX001',
+            status: 'PENDING',
+            scanned_sheet_url: `https://picsum.photos/seed/${resId}/800/1200`,
+            total_marks: 100,
+            is_published: false
+          });
+        }
+      }
+      
+      await fetchResults();
+      setIsEvaluating(false);
+      alert(`${files.length} scanned sheets uploaded successfully!`);
+    };
+    input.click();
+  };
+
+  const handlePublishResults = async (examId: string) => {
+    if (!window.confirm('Are you sure you want to publish results? This will notify students and parents.')) return;
+
+    const { error: examError } = await supabase
+      .from('exams')
+      .update({ results_status: 'PUBLISHED' })
+      .eq('id', examId);
+    
+    if (examError) {
+      console.error('Error updating exam status:', examError);
+      return;
+    }
+
+    const { error: resultsError } = await supabase
+      .from('results')
+      .update({ 
+        is_published: true,
+        published_at: new Date().toISOString()
+      })
+      .eq('exam_id', examId);
+
+    if (resultsError) {
+      console.error('Error publishing results:', resultsError);
+      return;
+    }
+
+    await fetchExams();
+    await fetchResults();
+    alert('Results published and notifications sent to Student and Parent panels!');
   };
 
   const handleExportPDF = () => {
@@ -544,9 +706,9 @@ export const Exams: React.FC = () => {
                         Evaluate
                       </button>
                     )}
-                    {canPublish && exam.results === 'PENDING' && (
+                    {canPublish && exam.results_status === 'PENDING' && (
                       <button 
-                        onClick={() => publishResults(exam.id)}
+                        onClick={() => handlePublishResults(exam.id)}
                         className="flex-1 py-2 bg-green-50 text-green-600 rounded-xl text-xs font-bold hover:bg-green-600 hover:text-white transition-all flex items-center justify-center gap-2"
                       >
                         <CheckCircle2 className="w-3 h-3" />
@@ -594,7 +756,10 @@ export const Exams: React.FC = () => {
           </button>
         </div>
         <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 px-4 py-2 bg-white border border-primary/10 text-slate-600 rounded-xl text-sm font-bold hover:bg-background transition-colors shadow-sm">
+          <button 
+            onClick={handleUploadScannedSheets}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-primary/10 text-slate-600 rounded-xl text-sm font-bold hover:bg-background transition-colors shadow-sm"
+          >
             <Upload className="w-4 h-4" />
             Upload Scanned Sheets
           </button>
@@ -702,7 +867,14 @@ export const Exams: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {results.filter(r => r.status !== 'PENDING').map((res) => (
+            {results
+              .filter(r => {
+                if (['STUDENT', 'PARENT'].includes(user?.role || '')) {
+                  return r.status !== 'PENDING' && r.is_published;
+                }
+                return r.status !== 'PENDING';
+              })
+              .map((res) => (
               <tr key={res.id} className="hover:bg-slate-50/50 transition-colors">
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
@@ -922,6 +1094,22 @@ export const Exams: React.FC = () => {
                     onChange={handleInputChange}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Select Question Paper</label>
+                  <select 
+                    name="paperId"
+                    required
+                    value={formData.paperId}
+                    onChange={handleInputChange}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  >
+                    <option value="">Select a Paper</option>
+                    {papers.map((p) => (
+                      <option key={p.id} value={p.id}>{p.title} ({p.subject})</option>
+                    ))}
+                  </select>
                 </div>
 
                 {linkedPaper && (

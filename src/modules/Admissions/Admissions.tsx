@@ -22,7 +22,9 @@ import {
   Save
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '../../lib/utils';
+import { cn, formatDate } from '../../lib/utils';
+
+import { supabase } from '../../lib/supabase';
 
 interface AdmissionApplication {
   id: string;
@@ -44,51 +46,91 @@ export const Admissions: React.FC = () => {
   const [form, setForm] = useState<Partial<AdmissionApplication>>({});
 
   useEffect(() => {
-    const saved = localStorage.getItem('edunexus_admissions');
-    if (saved) {
-      setApplications(JSON.parse(saved));
-    } else {
-      const initial = [
-        { id: 'ADM2024001', name: 'Siddharth Malhotra', email: 'sid.m@example.com', phone: '+91 98765 43220', branch: 'Computer Science', date: '2024-04-01', status: 'Pending', score: '94.5%' },
-        { id: 'ADM2024002', name: 'Ananya Panday', email: 'ananya.p@example.com', phone: '+91 98765 43221', branch: 'Information Technology', date: '2024-04-02', status: 'Verified', score: '88.2%' },
-        { id: 'ADM2024003', name: 'Varun Dhawan', email: 'varun.d@example.com', phone: '+91 98765 43222', branch: 'Mechanical Engineering', date: '2024-04-03', status: 'Approved', score: '91.0%' },
-        { id: 'ADM2024004', name: 'Sara Ali Khan', email: 'sara.k@example.com', phone: '+91 98765 43223', branch: 'Civil Engineering', date: '2024-04-04', status: 'Rejected', score: '72.5%' },
-      ];
-      setApplications(initial as AdmissionApplication[]);
-      localStorage.setItem('edunexus_admissions', JSON.stringify(initial));
-    }
+    fetchApplications();
   }, []);
 
-  const saveApps = (newApps: AdmissionApplication[]) => {
-    setApplications(newApps);
-    localStorage.setItem('edunexus_admissions', JSON.stringify(newApps));
-  };
+  const fetchApplications = async () => {
+    console.log('Fetching applications from Supabase...');
+    const { data, error } = await supabase
+      .from('applications')
+      .select('*')
+      .order('created_at', { ascending: false });
 
-  const handleSave = () => {
-    const newApp: AdmissionApplication = {
-      id: editingApp?.id || `ADM${new Date().getFullYear()}${Math.floor(1000 + Math.random() * 9000)}`,
-      name: form.name || '',
-      email: form.email || '',
-      phone: form.phone || '',
-      branch: form.branch || '',
-      date: form.date || new Date().toISOString().split('T')[0],
-      status: form.status || 'Pending',
-      score: form.score || '0%'
-    };
-
-    if (editingApp) {
-      saveApps(applications.map(a => a.id === editingApp.id ? newApp : a));
-    } else {
-      saveApps([...applications, newApp]);
+    if (error) {
+      console.error('Supabase error fetching applications:', error);
+      const saved = localStorage.getItem('edunexus_admissions');
+      if (saved) {
+        console.log('Loading applications from localStorage fallback');
+        setApplications(JSON.parse(saved));
+      }
+    } else if (data) {
+      console.log(`Fetched ${data.length} applications`);
+      const formatted: AdmissionApplication[] = data.map(a => ({
+        id: a.id,
+        name: a.name,
+        email: a.email || '',
+        phone: a.phone || '',
+        branch: a.branch || '',
+        date: a.date,
+        status: a.status as any,
+        score: a.score || '0%'
+      }));
+      setApplications(formatted);
+      localStorage.setItem('edunexus_admissions', JSON.stringify(formatted));
     }
-    setIsModalOpen(false);
-    setEditingApp(null);
-    setForm({});
   };
 
-  const handleDelete = (id: string) => {
+  const handleSave = async () => {
+    console.log('Attempting to save application...', form);
+    try {
+      if (!form.name || form.name.trim() === '') {
+        alert('Applicant Name is required');
+        return;
+      }
+
+      const appId = editingApp?.id || `ADM${new Date().getFullYear()}${Math.floor(1000 + Math.random() * 9000)}`;
+      const appData = {
+        id: appId,
+        name: form.name.trim(),
+        email: form.email?.trim() || '',
+        phone: form.phone?.trim() || '',
+        branch: form.branch || '',
+        date: form.date || new Date().toISOString().split('T')[0],
+        status: form.status || 'Pending',
+        score: form.score || '0%'
+      };
+
+      console.log('Upserting application data:', appData);
+      const { error } = await supabase
+        .from('applications')
+        .upsert(appData);
+
+      if (error) {
+        console.error('Supabase error saving application:', error);
+        alert(`Failed to save application: ${error.message}`);
+        return;
+      }
+
+      console.log('Application saved successfully');
+      await fetchApplications();
+      setIsModalOpen(false);
+      setEditingApp(null);
+      setForm({});
+    } catch (err) {
+      console.error('Unexpected error in handleSave:', err);
+      alert('An unexpected error occurred. Please check the console for details.');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this application?')) {
-      saveApps(applications.filter(a => a.id !== id));
+      const { error } = await supabase.from('applications').delete().eq('id', id);
+      if (error) {
+        console.error('Error deleting application:', error);
+        alert(`Failed to delete application: ${error.message}`);
+      } else {
+        await fetchApplications();
+      }
     }
   };
 
@@ -213,7 +255,17 @@ export const Admissions: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredApplications.map((app) => (
+              {filteredApplications.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-8 py-12 text-center text-slate-500 font-medium">
+                    <div className="flex flex-col items-center gap-2">
+                      <Clock className="w-8 h-8 text-slate-300" />
+                      <p>No applications found. New applications will appear here.</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                filteredApplications.map((app) => (
                 <tr key={app.id} className="hover:bg-primary/5 transition-colors group">
                   <td className="px-8 py-4">
                     <div className="flex items-center gap-3">
@@ -240,7 +292,7 @@ export const Admissions: React.FC = () => {
                   <td className="px-8 py-4">
                     <div className="flex items-center gap-2 text-sm text-slate-600">
                       <Calendar className="w-4 h-4 text-slate-400" />
-                      {app.date}
+                      {formatDate(app.date)}
                     </div>
                   </td>
                   <td className="px-8 py-4">
@@ -273,7 +325,7 @@ export const Admissions: React.FC = () => {
                     </div>
                   </td>
                 </tr>
-              ))}
+              )))}
             </tbody>
           </table>
         </div>

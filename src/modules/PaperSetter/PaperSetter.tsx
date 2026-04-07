@@ -13,10 +13,14 @@ import {
   Settings2,
   ChevronDown,
   ChevronUp,
-  Copy
+  Copy,
+  Edit2,
+  ChevronLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
+import { supabase } from '../../lib/supabase';
+import { useEffect } from 'react';
 
 type QuestionType = 'MCQ' | 'FILL_BLANKS' | 'ONE_SENTENCE' | 'SHORT_ANSWER' | 'LONG_ANSWER';
 
@@ -41,22 +45,125 @@ interface Paper {
 }
 
 export const PaperSetter: React.FC = () => {
+  const [view, setView] = useState<'list' | 'edit'>('list');
+  const [papers, setPapers] = useState<Paper[]>([]);
   const [paper, setPaper] = useState<Paper>({
-    id: 'p1',
-    title: 'Mid-Term Examination 2026',
-    course: 'B.Tech Computer Science',
-    subject: 'Data Structures & Algorithms',
+    id: `p${Math.random().toString(36).substr(2, 9)}`,
+    title: '',
+    course: '',
+    subject: '',
     totalMarks: 100,
     duration: 180,
-    questions: [
-      { id: 'q1', type: 'MCQ', text: 'What is the time complexity of binary search?', marks: 2, options: ['O(n)', 'O(log n)', 'O(n^2)', 'O(1)'], correctAnswer: 'O(log n)', difficulty: 'EASY' },
-      { id: 'q2', type: 'SHORT_ANSWER', text: 'Explain the difference between a stack and a queue.', marks: 5, difficulty: 'MEDIUM' },
-    ]
+    questions: []
   });
 
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [activeQuestion, setActiveQuestion] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchPapers();
+  }, []);
+
+  const fetchPapers = async () => {
+    const { data, error } = await supabase.from('papers').select('*').order('created_at', { ascending: false });
+    if (error) {
+      console.error('Error fetching papers:', error);
+      return;
+    }
+    if (data) {
+      const formattedPapers: Paper[] = data.map(p => ({
+        id: p.id,
+        title: p.title,
+        course: p.course,
+        subject: p.subject,
+        totalMarks: p.total_marks,
+        duration: p.duration,
+        questions: p.questions
+      }));
+      setPapers(formattedPapers);
+    }
+  };
+
+  const fetchPaper = async (id: string) => {
+    const { data, error } = await supabase.from('papers').select('*').eq('id', id).single();
+    if (error) {
+      console.error('Error fetching paper:', error);
+      return;
+    }
+    if (data) {
+      setPaper({
+        id: data.id,
+        title: data.title,
+        course: data.course,
+        subject: data.subject,
+        totalMarks: data.total_marks,
+        duration: data.duration,
+        questions: data.questions
+      });
+      setView('edit');
+    }
+  };
+
+  const savePaper = async () => {
+    if (!paper.title) {
+      alert('Please enter a paper title');
+      return;
+    }
+    setIsSaving(true);
+    
+    const paperData = {
+      id: paper.id,
+      title: paper.title,
+      course: paper.course,
+      subject: paper.subject,
+      total_marks: paper.totalMarks,
+      duration: paper.duration,
+      questions: paper.questions
+    };
+
+    const { error } = await supabase.from('papers').upsert(paperData);
+    
+    if (error) {
+      console.error('Error saving paper:', error);
+      setIsSaving(false);
+      alert('Error saving paper: ' + error.message);
+      return;
+    }
+
+    await fetchPapers();
+    setIsSaving(false);
+    setShowSuccess(true);
+    setTimeout(() => {
+      setShowSuccess(false);
+      setView('list');
+    }, 2000);
+  };
+
+  const handleCreateNew = () => {
+    setPaper({
+      id: `p${Math.random().toString(36).substr(2, 9)}`,
+      title: '',
+      course: '',
+      subject: '',
+      totalMarks: 100,
+      duration: 180,
+      questions: []
+    });
+    setView('edit');
+  };
+
+  const handleDeletePaper = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this paper?')) return;
+    
+    const { error } = await supabase.from('papers').delete().eq('id', id);
+    if (error) {
+      console.error('Error deleting paper:', error);
+      alert('Error deleting paper: ' + error.message);
+    } else {
+      await fetchPapers();
+    }
+  };
 
   const addQuestion = (type: QuestionType) => {
     const newQuestion: Question = {
@@ -82,55 +189,132 @@ export const PaperSetter: React.FC = () => {
     });
   };
 
-  const savePaper = () => {
-    setIsSaving(true);
-    // Simulate API call and save to localStorage
-    setTimeout(() => {
-      const savedPapers = JSON.parse(localStorage.getItem('edu_nexus_papers') || '[]');
-      const paperIndex = savedPapers.findIndex((p: any) => p.id === paper.id);
-      
-      if (paperIndex >= 0) {
-        savedPapers[paperIndex] = paper;
-      } else {
-        savedPapers.push(paper);
-      }
-      
-      localStorage.setItem('edu_nexus_papers', JSON.stringify(savedPapers));
-      setIsSaving(false);
-      setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 3000);
-    }, 1000);
-  };
-
   return (
-    <div className="max-w-5xl mx-auto space-y-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Paper Setter Module</h1>
-          <p className="text-slate-500">Create and configure examination papers (Up to 160 papers per course).</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button className="p-2 text-slate-500 hover:bg-primary/5 rounded-lg transition-colors border border-primary/10">
-            <Eye className="w-5 h-5" />
-          </button>
-          <button className="p-2 text-slate-500 hover:bg-primary/5 rounded-lg transition-colors border border-primary/10">
-            <Copy className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={savePaper}
-            disabled={isSaving}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-bold hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50"
-          >
-            {isSaving ? (
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+    <div className="max-w-6xl mx-auto space-y-8">
+      {view === 'list' ? (
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-6"
+        >
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900">Question Papers</h1>
+              <p className="text-slate-500">Manage and create examination papers.</p>
+            </div>
+            <button 
+              onClick={handleCreateNew}
+              className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+            >
+              <Plus className="w-5 h-5" />
+              Create New Paper
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {papers.length === 0 ? (
+              <div className="col-span-full bg-white border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center">
+                <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <FileText className="w-8 h-8 text-slate-300" />
+                </div>
+                <h4 className="text-lg font-bold text-slate-800 mb-1">No papers found</h4>
+                <p className="text-slate-500 mb-6">Start by creating your first examination paper.</p>
+                <button 
+                  onClick={handleCreateNew}
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all"
+                >
+                  <Plus className="w-5 h-5" />
+                  Create First Paper
+                </button>
+              </div>
             ) : (
-              <Save className="w-4 h-4" />
+              papers.map((p) => (
+                <motion.div 
+                  key={p.id}
+                  whileHover={{ y: -4 }}
+                  className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all group"
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
+                      <FileText className="w-6 h-6" />
+                    </div>
+                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={() => fetchPaper(p.id)}
+                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => handleDeletePaper(p.id)}
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-800 mb-1 line-clamp-1">{p.title}</h3>
+                  <p className="text-sm text-slate-500 mb-4">{p.subject} • {p.course}</p>
+                  <div className="flex items-center justify-between pt-4 border-t border-slate-50">
+                    <div className="flex items-center gap-4">
+                      <div className="text-center">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase">Questions</p>
+                        <p className="text-sm font-bold text-slate-700">{p.questions.length}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase">Marks</p>
+                        <p className="text-sm font-bold text-slate-700">{p.totalMarks}</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => fetchPaper(p.id)}
+                      className="text-xs font-bold text-indigo-600 hover:text-indigo-700"
+                    >
+                      Edit Paper →
+                    </button>
+                  </div>
+                </motion.div>
+              ))
             )}
-            {isSaving ? 'Saving...' : 'Save Paper'}
-          </button>
-        </div>
-      </div>
+          </div>
+        </motion.div>
+      ) : (
+        <div className="space-y-8">
+          {/* Header */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={() => setView('list')}
+                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <ChevronLeft className="w-6 h-6 text-slate-500" />
+              </button>
+              <div>
+                <h1 className="text-2xl font-bold text-slate-900">Paper Setter</h1>
+                <p className="text-slate-500">Configure your examination paper.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <button className="p-2 text-slate-500 hover:bg-primary/5 rounded-lg transition-colors border border-primary/10">
+                <Eye className="w-5 h-5" />
+              </button>
+              <button className="p-2 text-slate-500 hover:bg-primary/5 rounded-lg transition-colors border border-primary/10">
+                <Copy className="w-5 h-5" />
+              </button>
+              <button 
+                onClick={savePaper}
+                disabled={isSaving}
+                className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 disabled:opacity-50"
+              >
+                {isSaving ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Save className="w-5 h-5" />
+                )}
+                {isSaving ? 'Saving...' : 'Save Paper'}
+              </button>
+            </div>
+          </div>
 
       {/* Success Notification */}
       <AnimatePresence>
@@ -264,7 +448,7 @@ export const PaperSetter: React.FC = () => {
                       </h4>
                       <div className="flex items-center gap-3 mt-1">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded">
-                          {q.type.replace('_', ' ')}
+                          {q.type?.replace('_', ' ') || ''}
                         </span>
                         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                           {q.marks} Marks
@@ -372,8 +556,10 @@ export const PaperSetter: React.FC = () => {
               </motion.div>
             ))}
           </div>
+        </div>
+      </div>
 
-          {paper.questions.length === 0 && (
+      {paper.questions.length === 0 && (
             <div className="bg-white border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center">
               <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
                 <HelpCircle className="w-8 h-8 text-slate-300" />
@@ -383,7 +569,7 @@ export const PaperSetter: React.FC = () => {
             </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 };

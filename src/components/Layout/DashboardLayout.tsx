@@ -18,7 +18,8 @@ import {
   UserCheck,
   ClipboardList,
   BarChart3,
-  UserPlus
+  UserPlus,
+  MessageSquare
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { cn } from '../../lib/utils';
@@ -33,6 +34,7 @@ interface SidebarItem {
 
 const SIDEBAR_ITEMS: SidebarItem[] = [
   { title: 'Dashboard', icon: LayoutDashboard, path: '/', roles: ['SUPER_ADMIN', 'COLLEGE_ADMIN', 'FACULTY', 'STUDENT', 'PRINCIPAL', 'ACCOUNTANT', 'LIBRARIAN', 'STAFF'] },
+  { title: 'Front Office', icon: MessageSquare, path: '/front-office', roles: ['SUPER_ADMIN', 'COLLEGE_ADMIN', 'PRINCIPAL', 'STAFF'] },
   { title: 'Colleges', icon: GraduationCap, path: '/colleges', roles: ['SUPER_ADMIN'] },
   { title: 'Admissions', icon: UserPlus, path: '/admissions', roles: ['COLLEGE_ADMIN', 'PRINCIPAL'] },
   { title: 'Students', icon: Users, path: '/students', roles: ['COLLEGE_ADMIN', 'FACULTY', 'PRINCIPAL'] },
@@ -171,7 +173,7 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
             <div className="flex items-center gap-3 pl-2">
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-bold text-primary">{user.name}</p>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{user.role.replace('_', ' ')}</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{user.role?.replace('_', ' ') || ''}</p>
               </div>
               <div className="w-11 h-11 bg-primary/10 rounded-xl flex items-center justify-center border-2 border-white shadow-sm overflow-hidden">
                 <img 

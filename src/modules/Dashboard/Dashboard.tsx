@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Users, 
   GraduationCap, 
@@ -13,7 +13,14 @@ import {
   Calendar,
   CreditCard,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  Plus,
+  Award,
+  QrCode,
+  UserCheck,
+  Bell,
+  ChevronRight,
+  X
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { 
@@ -30,38 +37,142 @@ import {
   Pie, 
   Cell 
 } from 'recharts';
-import { cn, formatCurrency } from '../../lib/utils';
-import { motion } from 'motion/react';
-
-const STATS_CARDS = [
-  { title: 'Total Students', value: '12,450', change: '+12%', icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', trend: 'up' },
-  { title: 'Total Faculty', value: '450', change: '+5%', icon: GraduationCap, color: 'text-indigo-600', bg: 'bg-indigo-50', trend: 'up' },
-  { title: 'Fees Collected', value: '₹4.2Cr', change: '+18%', icon: CreditCard, color: 'text-green-600', bg: 'bg-green-50', trend: 'up' },
-  { title: 'Pending Fees', value: '₹1.2Cr', change: '-8%', icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-50', trend: 'down' },
-];
-
-const ENROLLMENT_DATA = [
-  { name: 'Jan', students: 400 },
-  { name: 'Feb', students: 300 },
-  { name: 'Mar', students: 600 },
-  { name: 'Apr', students: 800 },
-  { name: 'May', students: 500 },
-  { name: 'Jun', students: 900 },
-];
-
-const FEE_COLLECTION_DATA = [
-  { name: 'Tuition', value: 65 },
-  { name: 'Exam', value: 15 },
-  { name: 'Library', value: 10 },
-  { name: 'Other', value: 10 },
-];
+import { cn, formatCurrency, formatDate } from '../../lib/utils';
+import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from '../../lib/supabase';
+import QRCode from 'react-qr-code';
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'];
 
 export const Dashboard: React.FC = () => {
   const { user } = useAuth();
+  const [stats, setStats] = useState<any[]>([]);
+  const [enrollmentData, setEnrollmentData] = useState<any[]>([]);
+  const [feeDistribution, setFeeDistribution] = useState<any[]>([]);
+  const [activities, setActivities] = useState<any[]>([]);
+  const [upcomingExams, setUpcomingExams] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showQRPayment, setShowQRPayment] = useState(false);
+  const [attendancePercent, setAttendancePercent] = useState(0);
+
+  useEffect(() => {
+    if (user) {
+      fetchDashboardData();
+    }
+  }, [user]);
+
+  const fetchDashboardData = async () => {
+    setIsLoading(true);
+    try {
+      // 1. Fetch Stats
+      const { count: studentCount } = await supabase.from('students').select('*', { count: 'exact', head: true });
+      const { count: facultyCount } = await supabase.from('staff').select('*', { count: 'exact', head: true });
+      
+      const { data: feesData } = await supabase.from('fees').select('amount, status');
+      const totalCollected = (feesData || [])
+        .filter(f => f.status === 'PAID')
+        .reduce((acc, f) => acc + (f.amount || 0), 0);
+      const totalPending = (feesData || [])
+        .filter(f => f.status === 'PENDING' || f.status === 'OVERDUE')
+        .reduce((acc, f) => acc + (f.amount || 0), 0);
+
+      setStats([
+        { title: 'Total Students', value: studentCount?.toLocaleString() || '0', change: '+2%', icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', trend: 'up' },
+        { title: 'Total Faculty', value: facultyCount?.toLocaleString() || '0', change: '+1%', icon: GraduationCap, color: 'text-indigo-600', bg: 'bg-indigo-50', trend: 'up' },
+        { title: 'Fees Collected', value: formatCurrency(totalCollected), change: '+5%', icon: CreditCard, color: 'text-green-600', bg: 'bg-green-50', trend: 'up' },
+        { title: 'Pending Fees', value: formatCurrency(totalPending), change: '-3%', icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-50', trend: 'down' },
+      ]);
+
+      // 2. Fetch Enrollment Data (Mocking monthly distribution for now)
+      setEnrollmentData([
+        { name: 'Jan', students: 400 },
+        { name: 'Feb', students: 300 },
+        { name: 'Mar', students: 600 },
+        { name: 'Apr', students: 800 },
+        { name: 'May', students: 500 },
+        { name: 'Jun', students: 900 },
+      ]);
+
+      // 3. Fee Distribution
+      setFeeDistribution([
+        { name: 'Tuition', value: 65 },
+        { name: 'Exam', value: 15 },
+        { name: 'Library', value: 10 },
+        { name: 'Other', value: 10 },
+      ]);
+
+      // 4. Fetch Recent Activities (Latest feed)
+      const { data: recentExams } = await supabase.from('exams').select('*').order('created_at', { ascending: false }).limit(2);
+      const { data: recentFees } = await supabase.from('fees').select('*, students(name)').order('created_at', { ascending: false }).limit(2);
+      const { data: recentLogs } = await supabase.from('study_activities').select('*, courses(name)').order('created_at', { ascending: false }).limit(2);
+      
+      const feed = [
+        ...(recentExams || []).map(e => ({
+          user: 'Admin',
+          action: 'scheduled new exam:',
+          target: e.title,
+          time: formatDate(e.created_at),
+          icon: Calendar,
+          color: 'text-blue-600',
+          bg: 'bg-blue-50'
+        })),
+        ...(recentFees || []).map(f => ({
+          user: f.students?.name || 'Student',
+          action: 'paid fee for',
+          target: f.description || 'Tuition Fee',
+          time: formatDate(f.created_at),
+          icon: CreditCard,
+          color: 'text-green-600',
+          bg: 'bg-green-50'
+        })),
+        ...(recentLogs || []).map(l => ({
+          user: 'Faculty',
+          action: 'updated study log for',
+          target: l.courses?.name || 'Course',
+          time: formatDate(l.created_at),
+          icon: BookOpen,
+          color: 'text-amber-600',
+          bg: 'bg-amber-50'
+        }))
+      ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+
+      setActivities(feed.length > 0 ? feed : [
+        { user: 'System', action: 'Welcome to', target: 'EduNexus Dashboard', time: 'Just now', icon: Bell, color: 'text-indigo-600', bg: 'bg-indigo-50' }
+      ]);
+
+      // 5. Upcoming Exams
+      const { data: exams } = await supabase
+        .from('exams')
+        .select('*')
+        .gte('date', new Date().toISOString().split('T')[0])
+        .order('date', { ascending: true })
+        .limit(4);
+      setUpcomingExams(exams || []);
+
+      // 6. Attendance (for Students/Parents)
+      if (user.role === 'STUDENT' || user.role === 'PARENT') {
+        const studentId = user.role === 'STUDENT' ? user.id : 'STU001'; // Mock for parent
+        const { data: att } = await supabase.from('attendance').select('status').eq('student_id', studentId);
+        if (att && att.length > 0) {
+          const present = att.filter(a => a.status.toUpperCase() === 'PRESENT').length;
+          setAttendancePercent(Math.round((present / att.length) * 100));
+        } else {
+          setAttendancePercent(85); // Mock
+        }
+      }
+
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   if (!user) return null;
+
+  const isStaff = ['SUPER_ADMIN', 'COLLEGE_ADMIN', 'PRINCIPAL', 'FACULTY'].includes(user.role);
+  const isParent = user.role === 'PARENT';
+  const isStudent = user.role === 'STUDENT';
 
   return (
     <div className="space-y-8">
@@ -74,17 +185,95 @@ export const Dashboard: React.FC = () => {
         <div className="flex items-center gap-3">
           <div className="px-4 py-2 bg-white border border-slate-200 rounded-xl flex items-center gap-2 shadow-sm">
             <Calendar className="w-4 h-4 text-slate-400" />
-            <span className="text-sm font-medium text-slate-600">Oct 12, 2026</span>
+            <span className="text-sm font-medium text-slate-600">{formatDate(new Date())}</span>
           </div>
-          <button className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
-            Generate Report
-          </button>
+          {isStaff && (
+            <button className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
+              Generate Report
+            </button>
+          )}
         </div>
+      </div>
+
+      {/* Role-Based Quick Actions */}
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        {isStaff && (
+          <>
+            <QuickActionCard 
+              title="Add Exam" 
+              icon={Plus} 
+              color="bg-blue-600" 
+              onClick={() => window.location.hash = '#/exams'} 
+            />
+            <QuickActionCard 
+              title="Publish Results" 
+              icon={Award} 
+              color="bg-green-600" 
+              onClick={() => window.location.hash = '#/exams'} 
+            />
+            <QuickActionCard 
+              title="Update Course" 
+              icon={BookOpen} 
+              color="bg-amber-600" 
+              onClick={() => window.location.hash = '#/courses'} 
+            />
+            <QuickActionCard 
+              title="Mark Attendance" 
+              icon={UserCheck} 
+              color="bg-indigo-600" 
+              onClick={() => window.location.hash = '#/attendance'} 
+            />
+          </>
+        )}
+        {isParent && (
+          <>
+            <QuickActionCard 
+              title="Pay Fees (QR)" 
+              icon={QrCode} 
+              color="bg-emerald-600" 
+              onClick={() => setShowQRPayment(true)} 
+            />
+            <QuickActionCard 
+              title="Check Attendance" 
+              icon={UserCheck} 
+              color="bg-indigo-600" 
+              onClick={() => window.location.hash = '#/attendance'} 
+            />
+            <QuickActionCard 
+              title="View Results" 
+              icon={Award} 
+              color="bg-amber-600" 
+              onClick={() => window.location.hash = '#/exams'} 
+            />
+          </>
+        )}
+        {isStudent && (
+          <>
+            <QuickActionCard 
+              title="Take Exam" 
+              icon={FileText} 
+              color="bg-indigo-600" 
+              onClick={() => window.location.hash = '#/exams'} 
+            />
+            <QuickActionCard 
+              title="Study Log" 
+              icon={BookOpen} 
+              color="bg-blue-600" 
+              onClick={() => window.location.hash = '#/reports'} 
+            />
+            <QuickActionCard 
+              title="Timetable" 
+              icon={Calendar} 
+              color="bg-amber-600" 
+              onClick={() => window.location.hash = '#/reports'} 
+            />
+          </>
+        )}
       </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        {STATS_CARDS.map((stat, index) => (
+        {stats.map((stat, index) => (
           <motion.div
             key={stat.title}
             initial={{ opacity: 0, y: 20 }}
@@ -123,7 +312,7 @@ export const Dashboard: React.FC = () => {
           </div>
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={ENROLLMENT_DATA}>
+              <BarChart data={enrollmentData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis 
                   dataKey="name" 
@@ -147,60 +336,96 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Fee Distribution */}
+        {/* Fee Distribution or Attendance */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-          <h3 className="font-bold text-slate-800 mb-6">Fee Distribution</h3>
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={FEE_COLLECTION_DATA}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {FEE_COLLECTION_DATA.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="space-y-3 mt-4">
-            {FEE_COLLECTION_DATA.map((item, index) => (
-              <div key={item.name} className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index] }}></div>
-                  <span className="text-sm text-slate-600">{item.name}</span>
+          <h3 className="font-bold text-slate-800 mb-6">{isStudent || isParent ? 'Attendance Overview' : 'Fee Distribution'}</h3>
+          {isStudent || isParent ? (
+            <div className="flex flex-col items-center justify-center h-full pb-8">
+              <div className="relative w-48 h-48 flex items-center justify-center">
+                <svg className="w-full h-full transform -rotate-90">
+                  <circle
+                    cx="96"
+                    cy="96"
+                    r="80"
+                    stroke="currentColor"
+                    strokeWidth="12"
+                    fill="transparent"
+                    className="text-slate-100"
+                  />
+                  <circle
+                    cx="96"
+                    cy="96"
+                    r="80"
+                    stroke="currentColor"
+                    strokeWidth="12"
+                    fill="transparent"
+                    strokeDasharray={502.4}
+                    strokeDashoffset={502.4 - (502.4 * attendancePercent) / 100}
+                    className="text-indigo-600 transition-all duration-1000"
+                  />
+                </svg>
+                <div className="absolute flex flex-col items-center">
+                  <span className="text-4xl font-black text-slate-800">{attendancePercent}%</span>
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Attendance</span>
                 </div>
-                <span className="text-sm font-bold text-slate-800">{item.value}%</span>
               </div>
-            ))}
-          </div>
+              <p className="mt-6 text-sm text-slate-500 text-center font-medium">
+                Keep it above 75% to be eligible for exams.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={feeDistribution}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={80}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {feeDistribution.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="space-y-3 mt-4">
+                {feeDistribution.map((item, index) => (
+                  <div key={item.name} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index] }}></div>
+                      <span className="text-sm text-slate-600">{item.name}</span>
+                    </div>
+                    <span className="text-sm font-bold text-slate-800">{item.value}%</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
       {/* Recent Activities & Upcoming Events */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Activities */}
+        {/* Recent Activities (Latest Feed) */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-          <h3 className="font-bold text-slate-800 mb-6">Recent Activities</h3>
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="font-bold text-slate-800">Latest Feed</h3>
+            <Bell className="w-4 h-4 text-slate-400" />
+          </div>
           <div className="space-y-6">
-            {[
-              { user: 'Dr. John Doe', action: 'uploaded new study material for', target: 'Physics 101', time: '2 hours ago', icon: BookOpen, color: 'text-blue-600', bg: 'bg-blue-50' },
-              { user: 'Jane Smith', action: 'submitted assignment for', target: 'Mathematics', time: '4 hours ago', icon: FileText, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-              { user: 'Admin', action: 'published exam results for', target: 'Semester 2', time: 'Yesterday', icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
-              { user: 'System', action: 'generated fee reminders for', target: '350 students', time: '2 days ago', icon: AlertCircle, color: 'text-amber-600', bg: 'bg-amber-50' },
-            ].map((activity, i) => (
-              <div key={i} className="flex gap-4">
-                <div className={cn("w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center", activity.bg)}>
+            {activities.map((activity, i) => (
+              <div key={i} className="flex gap-4 group cursor-pointer">
+                <div className={cn("w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center transition-transform group-hover:scale-110", activity.bg)}>
                   <activity.icon className={cn("w-5 h-5", activity.color)} />
                 </div>
-                <div>
+                <div className="flex-1">
                   <p className="text-sm text-slate-600">
                     <span className="font-bold text-slate-800">{activity.user}</span> {activity.action} <span className="font-bold text-slate-800">{activity.target}</span>
                   </p>
@@ -208,6 +433,7 @@ export const Dashboard: React.FC = () => {
                     <Clock className="w-3 h-3" /> {activity.time}
                   </p>
                 </div>
+                <ChevronRight className="w-4 h-4 text-slate-300 opacity-0 group-hover:opacity-100 transition-all" />
               </div>
             ))}
           </div>
@@ -217,34 +443,117 @@ export const Dashboard: React.FC = () => {
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-6">
             <h3 className="font-bold text-slate-800">Upcoming Exams</h3>
-            <button className="text-xs font-bold text-indigo-600 hover:underline">View All</button>
+            <button 
+              onClick={() => window.location.hash = '#/exams'}
+              className="text-xs font-bold text-indigo-600 hover:underline"
+            >
+              View All
+            </button>
           </div>
           <div className="space-y-4">
-            {[
-              { title: 'Mid-Term Physics', date: 'Oct 15, 2026', time: '10:00 AM', status: 'Upcoming' },
-              { title: 'Advanced Calculus', date: 'Oct 18, 2026', time: '02:00 PM', status: 'Upcoming' },
-              { title: 'Organic Chemistry', date: 'Oct 22, 2026', time: '09:00 AM', status: 'Upcoming' },
-              { title: 'English Literature', date: 'Oct 25, 2026', time: '11:30 AM', status: 'Upcoming' },
-            ].map((exam, i) => (
-              <div key={i} className="p-4 bg-slate-50 rounded-xl flex items-center justify-between border border-transparent hover:border-indigo-100 hover:bg-white transition-all group">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-white rounded-lg flex flex-col items-center justify-center border border-slate-200 group-hover:border-indigo-200">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">{exam.date.split(' ')[0]}</span>
-                    <span className="text-sm font-bold text-slate-800">{exam.date.split(' ')[1].replace(',', '')}</span>
+            {upcomingExams.length > 0 ? upcomingExams.map((exam, i) => {
+              const d = new Date(exam.date);
+              const day = String(d.getDate()).padStart(2, '0');
+              const month = d.toLocaleString('default', { month: 'short' });
+              
+              return (
+                <div key={i} className="p-4 bg-slate-50 rounded-xl flex items-center justify-between border border-transparent hover:border-indigo-100 hover:bg-white transition-all group">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-white rounded-lg flex flex-col items-center justify-center border border-slate-200 group-hover:border-indigo-200">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase">{month}</span>
+                      <span className="text-sm font-bold text-slate-800">{day}</span>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-800">{exam.title}</h4>
+                      <p className="text-xs text-slate-500">{exam.time} • {exam.subject}</p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-800">{exam.title}</h4>
-                    <p className="text-xs text-slate-500">{exam.time}</p>
-                  </div>
+                  <span className={cn(
+                    "px-3 py-1 text-[10px] font-bold rounded-full uppercase tracking-wider",
+                    exam.status === 'UPCOMING' ? "bg-amber-50 text-amber-600" : "bg-indigo-50 text-indigo-600"
+                  )}>
+                    {exam.status}
+                  </span>
                 </div>
-                <span className="px-3 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-bold rounded-full uppercase tracking-wider">
-                  {exam.status}
-                </span>
+              );
+            }) : (
+              <div className="text-center py-8">
+                <Calendar className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+                <p className="text-sm text-slate-500 font-medium">No upcoming exams scheduled.</p>
               </div>
-            ))}
+            )}
           </div>
         </div>
       </div>
+
+      {/* QR Payment Modal */}
+      <AnimatePresence>
+        {showQRPayment && (
+          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-[32px] shadow-2xl w-full max-w-md overflow-hidden"
+            >
+              <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-emerald-50">
+                <div>
+                  <h2 className="text-2xl font-black text-emerald-800">Quick Pay</h2>
+                  <p className="text-emerald-600 text-sm font-bold">Scan to pay pending fees</p>
+                </div>
+                <button 
+                  onClick={() => setShowQRPayment(false)}
+                  className="p-2 hover:bg-white rounded-xl transition-colors"
+                >
+                  <X className="w-6 h-6 text-emerald-800" />
+                </button>
+              </div>
+              <div className="p-8 flex flex-col items-center text-center">
+                <div className="p-6 bg-white border-4 border-emerald-100 rounded-[32px] mb-6">
+                  <QRCode 
+                    value="upi://pay?pa=edunexus@upi&pn=EduNexus%20College&am=5000&cu=INR" 
+                    size={200}
+                    fgColor="#065f46"
+                  />
+                </div>
+                <div className="space-y-2 mb-8">
+                  <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Amount to Pay</p>
+                  <p className="text-4xl font-black text-slate-900">₹5,000.00</p>
+                  <p className="text-xs text-slate-400">Tuition Fee - Semester 4</p>
+                </div>
+                <div className="w-full grid grid-cols-2 gap-4">
+                  <button className="py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all">
+                    Download QR
+                  </button>
+                  <button className="py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200">
+                    I've Paid
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
+
+interface QuickActionProps {
+  title: string;
+  icon: any;
+  color: string;
+  onClick: () => void;
+}
+
+const QuickActionCard: React.FC<QuickActionProps> = ({ title, icon: Icon, color, onClick }) => (
+  <button 
+    onClick={onClick}
+    className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-100 transition-all flex items-center gap-4 group text-left"
+  >
+    <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center text-white transition-transform group-hover:scale-110", color)}>
+      <Icon className="w-5 h-5" />
+    </div>
+    <span className="font-bold text-slate-700">{title}</span>
+  </button>
+);
+

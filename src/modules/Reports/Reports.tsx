@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -24,11 +24,22 @@ import {
   Phone,
   DollarSign,
   PieChart,
-  History
+  History,
+  Share2,
+  Smartphone,
+  FileDown,
+  FileSpreadsheet,
+  X
 } from 'lucide-react';
-import { cn, formatDate } from '../../lib/utils';
+import { cn, formatDate, formatCurrency } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../../hooks/useAuth';
+import { supabase } from '../../lib/supabase';
+import { exportToPDF, exportToExcel } from '../../lib/exportUtils';
+import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } from 'docx';
+import { saveAs } from 'file-saver';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 type ReportType = 
   | 'PROFIT_LOSS' 
@@ -59,24 +70,265 @@ const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'PASSING_REPORT', title: 'Passing Report', description: 'Exam pass/fail analysis and trends', icon: CheckCircle2, color: 'text-green-600' },
 ];
 
+const ReportFilters = ({ filters, setFilters, masterData }: any) => {
+  return (
+    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-5 gap-4">
+      <div className="space-y-1">
+        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Student</label>
+        <select 
+          value={filters.student}
+          onChange={(e) => setFilters({...filters, student: e.target.value})}
+          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+        >
+          <option value="">All Students</option>
+          {masterData.students.map((s: any) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="space-y-1">
+        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Branch / Course</label>
+        <select 
+          value={filters.branch}
+          onChange={(e) => setFilters({...filters, branch: e.target.value})}
+          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+        >
+          <option value="">All Branches</option>
+          {masterData.courses.map((c: any) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="space-y-1">
+        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Year</label>
+        <select 
+          value={filters.year}
+          onChange={(e) => setFilters({...filters, year: e.target.value})}
+          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+        >
+          <option value="">All Years</option>
+          {['1st Year', '2nd Year', '3rd Year', '4th Year'].map(y => (
+            <option key={y} value={y}>{y}</option>
+          ))}
+        </select>
+      </div>
+      <div className="space-y-1">
+        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Session / Batch</label>
+        <select 
+          value={filters.session}
+          onChange={(e) => setFilters({...filters, session: e.target.value})}
+          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+        >
+          <option value="">All Sessions</option>
+          {['2023-24', '2024-25', '2025-26'].map(s => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+      </div>
+      <div className="flex items-end">
+        <button 
+          onClick={() => setFilters({ student: '', branch: '', year: '', session: '', course: '' })}
+          className="w-full px-4 py-2 text-slate-500 font-bold text-sm hover:text-indigo-600 transition-colors"
+        >
+          Reset Filters
+        </button>
+      </div>
+    </div>
+  );
+};
+
 export const Reports: React.FC = () => {
   const { user } = useAuth();
   const [activeReport, setActiveReport] = useState<ReportType | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  const [filters, setFilters] = useState({ student: '', branch: '', year: '', session: '', course: '' });
+  const [masterData, setMasterData] = useState({ students: [], courses: [], sessions: [], years: [] });
+  const [papers, setPapers] = useState<any[]>([]);
+  const [duesData, setDuesData] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetchMasterData();
+    fetchPapers();
+    fetchDues();
+  }, []);
+
+  const fetchMasterData = async () => {
+    const [studentsRes, coursesRes] = await Promise.all([
+      supabase.from('students').select('id, name, branch, year, batch'),
+      supabase.from('courses').select('id, name')
+    ]);
+
+    setMasterData({
+      students: studentsRes.data || [],
+      courses: coursesRes.data || [],
+      sessions: ['2023-24', '2024-25', '2025-26'] as any,
+      years: ['1st Year', '2nd Year', '3rd Year', '4th Year'] as any
+    });
+  };
+
+  const fetchPapers = async () => {
+    const { data } = await supabase.from('papers').select('*');
+    if (data) setPapers(data);
+  };
+
+  const fetchDues = async () => {
+    const { data } = await supabase
+      .from('fees')
+      .select(`
+        *,
+        students (
+          name,
+          roll_no,
+          branch,
+          year,
+          batch,
+          phone
+        )
+      `)
+      .eq('status', 'PENDING');
+    
+    if (data) {
+      setDuesData(data.map(d => ({
+        id: d.id,
+        name: d.students?.name,
+        roll: d.students?.roll_no,
+        branch: d.students?.branch,
+        year: d.students?.year,
+        batch: d.students?.batch,
+        total: d.amount,
+        paid: 0, // Simplified for demo
+        dues: d.amount,
+        phone: d.students?.phone
+      })));
+    }
+  };
 
   const handlePrint = () => {
     window.print();
   };
 
-  const sendWhatsAppReminder = (studentName: string, amount: number) => {
-    const message = `Dear Parent, this is a reminder regarding the pending fees of ${amount} for your ward ${studentName}. Please clear the dues at the earliest. - EduNexus College`;
+  const sendWhatsAppReminder = (studentName: string, amount: number, phone?: string) => {
+    const message = `Dear Parent, this is a reminder regarding the pending fees of ₹${amount} for your ward ${studentName}. Please clear the dues at the earliest. - EduNexus College`;
     const encodedMessage = encodeURIComponent(message);
-    window.open(`https://wa.me/?text=${encodedMessage}`, '_blank');
+    const whatsappUrl = phone ? `https://wa.me/${phone}?text=${encodedMessage}` : `https://wa.me/?text=${encodedMessage}`;
+    window.open(whatsappUrl, '_blank');
   };
+
+  const shareReceiptWhatsApp = (student: any) => {
+    const message = `Dear Parent, fee receipt for ${student.name} (Roll: ${student.roll}) for amount ₹${student.total} has been generated. Status: PAID. - EduNexus College`;
+    const encodedMessage = encodeURIComponent(message);
+    const whatsappUrl = student.phone ? `https://wa.me/${student.phone}?text=${encodedMessage}` : `https://wa.me/?text=${encodedMessage}`;
+    window.open(whatsappUrl, '_blank');
+  };
+
+  const downloadPaperWord = async (paper: any) => {
+    const doc = new Document({
+      sections: [{
+        properties: {},
+        children: [
+          new Paragraph({
+            text: paper.title,
+            heading: HeadingLevel.HEADING_1,
+            alignment: AlignmentType.CENTER,
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: `Course: ${paper.course}`, bold: true }),
+              new TextRun({ text: `\tSubject: ${paper.subject}`, bold: true }),
+            ],
+            alignment: AlignmentType.CENTER,
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: `Total Marks: ${paper.total_marks || paper.totalMarks}`, bold: true }),
+              new TextRun({ text: `\tDuration: ${paper.duration} Min`, bold: true }),
+            ],
+            alignment: AlignmentType.CENTER,
+          }),
+          new Paragraph({ text: "", spacing: { after: 200 } }),
+          ...paper.questions.flatMap((q: any, i: number) => [
+            new Paragraph({
+              children: [
+                new TextRun({ text: `Q${i + 1}. ${q.text}`, bold: true }),
+                new TextRun({ text: `\t(${q.marks} Marks)`, italics: true }),
+              ],
+              spacing: { before: 200 },
+            }),
+            ...(q.type === 'MCQ' ? q.options.map((opt: string, optIdx: number) => 
+              new Paragraph({ text: `${String.fromCharCode(65 + optIdx)}) ${opt}`, indent: { left: 720 } })
+            ) : []),
+          ]),
+        ],
+      }],
+    });
+
+    const blob = await Packer.toBlob(doc);
+    saveAs(blob, `${paper.title.replace(/\s+/g, '_')}.docx`);
+  };
+
+  const downloadPaperPDF = (paper: any) => {
+    const doc = new jsPDF();
+    doc.setFontSize(20);
+    doc.text(paper.title, 105, 20, { align: 'center' });
+    doc.setFontSize(12);
+    doc.text(`Course: ${paper.course} | Subject: ${paper.subject}`, 105, 30, { align: 'center' });
+    doc.text(`Total Marks: ${paper.total_marks || paper.totalMarks} | Duration: ${paper.duration} Min`, 105, 38, { align: 'center' });
+    
+    let y = 50;
+    paper.questions.forEach((q: any, i: number) => {
+      if (y > 270) {
+        doc.addPage();
+        y = 20;
+      }
+      doc.setFont("helvetica", "bold");
+      doc.text(`Q${i + 1}. ${q.text} (${q.marks} Marks)`, 14, y);
+      y += 7;
+      
+      if (q.type === 'MCQ') {
+        q.options.forEach((opt: string, optIdx: number) => {
+          doc.setFont("helvetica", "normal");
+          doc.text(`${String.fromCharCode(65 + optIdx)}) ${opt}`, 20, y);
+          y += 6;
+        });
+      }
+      y += 5;
+    });
+    
+    doc.save(`${paper.title.replace(/\s+/g, '_')}.pdf`);
+  };
+
+  const handleExportDuesPDF = () => {
+    const headers = ['Student Name', 'Roll No', 'Total Fee', 'Paid', 'Dues'];
+    const data = filteredDues.map(s => [s.name, s.roll, formatCurrency(s.total), formatCurrency(s.paid), formatCurrency(s.dues)]);
+    exportToPDF('Dues Fees Report', headers, data, 'Dues_Report');
+  };
+
+  const handleExportDuesExcel = () => {
+    const data = filteredDues.map(s => ({
+      'Student Name': s.name,
+      'Roll No': s.roll,
+      'Total Fee': s.total,
+      'Paid': s.paid,
+      'Dues': s.dues
+    }));
+    exportToExcel(data, 'Dues_Report');
+  };
+
+  const filteredDues = duesData.filter(student => {
+    const matchesSearch = student.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                         student.roll.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStudent = !filters.student || student.id === filters.student;
+    const matchesBranch = !filters.branch || student.branch === filters.branch;
+    const matchesYear = !filters.year || student.year === filters.year;
+    const matchesSession = !filters.session || student.batch === filters.session;
+    
+    return matchesSearch && matchesStudent && matchesBranch && matchesYear && matchesSession;
+  });
 
   const renderProfitLoss = () => (
     <div className="space-y-6">
+      <ReportFilters filters={filters} setFilters={setFilters} masterData={masterData} />
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-100">
           <div className="flex items-center justify-between mb-4">
@@ -142,21 +394,31 @@ export const Reports: React.FC = () => {
 
   const renderDuesFees = () => (
     <div className="space-y-6">
+      <ReportFilters filters={filters} setFilters={setFilters} masterData={masterData} />
+      
       <div className="flex items-center justify-between">
         <div className="relative flex-1 max-w-md">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input 
             type="text" 
             placeholder="Search student or roll number..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
           />
         </div>
         <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all shadow-sm">
-            <Filter className="w-4 h-4" />
-            Filter by Batch
+          <button 
+            onClick={handleExportDuesExcel}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all shadow-sm"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            Excel
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200">
+          <button 
+            onClick={handleExportDuesPDF}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+          >
             <Download className="w-4 h-4" />
             Export PDF
           </button>
@@ -176,43 +438,48 @@ export const Reports: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {[
-              { name: 'Rahul Sharma', roll: 'CS202401', total: 45000, paid: 30000, dues: 15000 },
-              { name: 'Priya Patel', roll: 'CS202405', total: 45000, paid: 45000, dues: 0 },
-              { name: 'Amit Kumar', roll: 'IT202412', total: 42000, paid: 20000, dues: 22000 },
-              { name: 'Sneha Reddy', roll: 'EC202408', total: 48000, paid: 40000, dues: 8000 },
-            ].map((student) => (
+            {filteredDues.map((student) => (
               <tr key={student.roll} className="hover:bg-slate-50 transition-colors">
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
-                      {student.name.charAt(0)}
+                      {student.name?.charAt(0)}
                     </div>
-                    <span className="font-bold text-slate-700">{student.name}</span>
+                    <div>
+                      <span className="font-bold text-slate-700 block">{student.name}</span>
+                      <span className="text-[10px] text-slate-400">{masterData.courses.find((c: any) => c.id === student.branch)?.name || student.branch}</span>
+                    </div>
                   </div>
                 </td>
                 <td className="px-6 py-4 text-sm text-slate-500">{student.roll}</td>
-                <td className="px-6 py-4 text-sm font-bold text-slate-700">₹{student.total}</td>
-                <td className="px-6 py-4 text-sm font-bold text-emerald-600">₹{student.paid}</td>
+                <td className="px-6 py-4 text-sm font-bold text-slate-700">{formatCurrency(student.total)}</td>
+                <td className="px-6 py-4 text-sm font-bold text-emerald-600">{formatCurrency(student.paid)}</td>
                 <td className="px-6 py-4">
                   <span className={cn(
                     "text-sm font-bold",
                     student.dues > 0 ? "text-rose-600" : "text-emerald-600"
                   )}>
-                    ₹{student.dues}
+                    {formatCurrency(student.dues)}
                   </span>
                 </td>
                 <td className="px-6 py-4 text-right">
                   <div className="flex items-center justify-end gap-2">
                     {student.dues > 0 && (
                       <button 
-                        onClick={() => sendWhatsAppReminder(student.name, student.dues)}
+                        onClick={() => sendWhatsAppReminder(student.name, student.dues, student.phone)}
                         className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
                         title="Send WhatsApp Reminder"
                       >
-                        <MessageSquare className="w-4 h-4" />
+                        <Smartphone className="w-4 h-4" />
                       </button>
                     )}
+                    <button 
+                      onClick={() => shareReceiptWhatsApp(student)}
+                      className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                      title="Share Receipt via WhatsApp"
+                    >
+                      <Share2 className="w-4 h-4" />
+                    </button>
                     <button 
                       onClick={handlePrint}
                       className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
@@ -224,17 +491,34 @@ export const Reports: React.FC = () => {
                 </td>
               </tr>
             ))}
+            {filteredDues.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-6 py-12 text-center text-slate-500 font-medium">
+                  No records found matching the filters.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
     </div>
   );
 
+  const filteredPapers = papers.filter(paper => {
+    const matchesSearch = paper.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                         paper.subject.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesBranch = !filters.branch || paper.course === masterData.courses.find((c: any) => c.id === filters.branch)?.name || paper.course === filters.branch;
+    
+    return matchesSearch && matchesBranch;
+  });
+
   const renderExamination = () => (
     <div className="space-y-6">
+      <ReportFilters filters={filters} setFilters={setFilters} masterData={masterData} />
+
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {[
-          { title: 'Total Exams', value: '24', icon: FileText, color: 'text-blue-600', bg: 'bg-blue-50' },
+          { title: 'Total Exams', value: papers.length.toString(), icon: FileText, color: 'text-blue-600', bg: 'bg-blue-50' },
           { title: 'Avg. Score', value: '78%', icon: BarChart3, color: 'text-indigo-600', bg: 'bg-indigo-50' },
           { title: 'Pass Rate', value: '92%', icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
           { title: 'Pending Results', value: '3', icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
@@ -251,44 +535,47 @@ export const Reports: React.FC = () => {
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="font-black text-slate-800">Recent Exam Performance</h3>
-          <div className="flex items-center gap-2">
-            <select className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none">
-              <option>B.Tech CS</option>
-              <option>B.Tech IT</option>
-            </select>
+          <h3 className="font-black text-slate-800">Question Papers</h3>
+          <div className="relative max-w-xs">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input 
+              type="text" 
+              placeholder="Search papers..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
+            />
           </div>
         </div>
         <div className="p-6">
-          <div className="space-y-6">
-            {[
-              { subject: 'Advanced Mathematics', students: 120, passed: 112, failed: 8, avg: 82 },
-              { subject: 'Data Structures', students: 115, passed: 105, failed: 10, avg: 75 },
-              { subject: 'Digital Electronics', students: 118, passed: 110, failed: 8, avg: 79 },
-            ].map((exam) => (
-              <div key={exam.subject} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-bold text-slate-800">{exam.subject}</p>
-                    <p className="text-xs text-slate-500">{exam.students} Students Appeared</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-black text-indigo-600">{exam.avg}% Avg</p>
-                    <p className="text-xs text-emerald-600">{exam.passed} Passed • {exam.failed} Failed</p>
-                  </div>
+          <div className="space-y-4">
+            {filteredPapers.map((paper) => (
+              <div key={paper.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
+                <div>
+                  <p className="font-bold text-slate-800">{paper.title}</p>
+                  <p className="text-xs text-slate-500">{paper.course} • {paper.subject}</p>
                 </div>
-                <div className="h-2 bg-slate-100 rounded-full overflow-hidden flex">
-                  <div 
-                    className="h-full bg-emerald-500" 
-                    style={{ width: `${(exam.passed / exam.students) * 100}%` }}
-                  />
-                  <div 
-                    className="h-full bg-rose-500" 
-                    style={{ width: `${(exam.failed / exam.students) * 100}%` }}
-                  />
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => downloadPaperWord(paper)}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-50 transition-all"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    Word
+                  </button>
+                  <button 
+                    onClick={() => downloadPaperPDF(paper)}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 text-rose-600 rounded-lg text-xs font-bold hover:bg-rose-50 transition-all"
+                  >
+                    <FileDown className="w-3.5 h-3.5" />
+                    PDF
+                  </button>
                 </div>
               </div>
             ))}
+            {filteredPapers.length === 0 && (
+              <p className="text-center py-8 text-slate-400 italic">No question papers found matching the filters.</p>
+            )}
           </div>
         </div>
       </div>
@@ -297,6 +584,7 @@ export const Reports: React.FC = () => {
 
   const renderLedger = () => (
     <div className="space-y-6">
+      <ReportFilters filters={filters} setFilters={setFilters} masterData={masterData} />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div className="bg-white p-2 rounded-xl border border-slate-200 flex items-center gap-2">
@@ -355,6 +643,7 @@ export const Reports: React.FC = () => {
 
   const renderPassingReport = () => (
     <div className="space-y-6">
+      <ReportFilters filters={filters} setFilters={setFilters} masterData={masterData} />
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
           <h3 className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-4">Overall Pass Percentage</h3>
@@ -433,6 +722,7 @@ export const Reports: React.FC = () => {
 
   const renderFineReport = () => (
     <div className="space-y-6">
+      <ReportFilters filters={filters} setFilters={setFilters} masterData={masterData} />
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {[
           { title: 'Total Fines', value: '₹45,200', icon: AlertCircle, color: 'text-rose-600', bg: 'bg-rose-50' },
@@ -490,6 +780,7 @@ export const Reports: React.FC = () => {
 
   const renderIncomeExpense = () => (
     <div className="space-y-6">
+      <ReportFilters filters={filters} setFilters={setFilters} masterData={masterData} />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
           <h3 className="font-black text-slate-800 mb-6 flex items-center gap-2">
@@ -545,6 +836,7 @@ export const Reports: React.FC = () => {
 
   const renderStudentLedger = () => (
     <div className="space-y-6">
+      <ReportFilters filters={filters} setFilters={setFilters} masterData={masterData} />
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-6">
         <div className="w-20 h-20 bg-indigo-100 rounded-2xl flex items-center justify-center text-indigo-600 text-3xl font-black">
           RS
@@ -641,7 +933,7 @@ export const Reports: React.FC = () => {
               onClick={() => setActiveReport(category.id)}
               className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:shadow-xl hover:border-indigo-200 transition-all text-left group"
             >
-              <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform", category.color.replace('text-', 'bg-').replace('600', '50'))}>
+              <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform", (category.color || '').replace('text-', 'bg-').replace('600', '50'))}>
                 <category.icon className={cn("w-7 h-7", category.color)} />
               </div>
               <h3 className="font-black text-slate-800 text-lg mb-2">{category.title}</h3>
