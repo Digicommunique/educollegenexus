@@ -39,7 +39,7 @@ import {
 } from 'recharts';
 import { cn, formatCurrency, formatDate } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { supabase } from '../../lib/supabase';
+import { supabase, testSupabaseConnection } from '../../lib/supabase';
 import QRCode from 'react-qr-code';
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'];
@@ -54,12 +54,19 @@ export const Dashboard: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [showQRPayment, setShowQRPayment] = useState(false);
   const [attendancePercent, setAttendancePercent] = useState(0);
+  const [dbStatus, setDbStatus] = useState<{ connected: boolean; message: string } | null>(null);
 
   useEffect(() => {
     if (user) {
+      checkConnection();
       fetchDashboardData();
     }
   }, [user]);
+
+  const checkConnection = async () => {
+    const status = await testSupabaseConnection();
+    setDbStatus(status);
+  };
 
   const fetchDashboardData = async () => {
     setIsLoading(true);
@@ -183,6 +190,15 @@ export const Dashboard: React.FC = () => {
           <p className="text-slate-500">Here's what's happening at your college today.</p>
         </div>
         <div className="flex items-center gap-3">
+          {dbStatus && (
+            <div className={cn(
+              "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 border",
+              dbStatus.connected ? "bg-green-50 text-green-600 border-green-100" : "bg-red-50 text-red-600 border-red-100"
+            )}>
+              <div className={cn("w-2 h-2 rounded-full animate-pulse", dbStatus.connected ? "bg-green-500" : "bg-red-500")} />
+              {dbStatus.connected ? "DB Connected" : "DB Disconnected"}
+            </div>
+          )}
           <div className="px-4 py-2 bg-white border border-slate-200 rounded-xl flex items-center gap-2 shadow-sm">
             <Calendar className="w-4 h-4 text-slate-400" />
             <span className="text-sm font-medium text-slate-600">{formatDate(new Date())}</span>

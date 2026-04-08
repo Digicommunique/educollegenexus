@@ -11,3 +11,13 @@ export const supabase = createClient(
   supabaseUrl || 'https://placeholder.supabase.co',
   supabaseAnonKey || 'placeholder-key'
 );
+
+export const testSupabaseConnection = async () => {
+  try {
+    const { data, error } = await supabase.from('students').select('id').limit(1);
+    if (error) throw error;
+    return { connected: true, message: 'Connected to Supabase' };
+  } catch (error: any) {
+    return { connected: false, message: error.message || 'Connection failed' };
+  }
+};
