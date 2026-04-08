@@ -152,6 +152,10 @@ export const Students: React.FC = () => {
           emergencyPhone: s.emergency_phone,
           emergencyAddress: s.emergency_address,
           allergy: s.allergies,
+          photoUrl: s.photo_url,
+          studentDocsUrl: s.student_docs_url,
+          parentDocsUrl: s.parent_docs_url,
+          signatureUrl: s.signature_url,
           status: s.status as 'Active' | 'Inactive'
         };
       });
@@ -167,12 +171,20 @@ export const Students: React.FC = () => {
 
   const addStudentToSupabase = async (student: any) => {
     const { error } = await supabase.from('students').insert([student]);
-    if (error) console.error('Error adding student to Supabase:', error);
+    if (error) {
+      console.error('Error adding student to Supabase:', error);
+      return { success: false, error };
+    }
+    return { success: true };
   };
 
   const updateStudentInSupabase = async (student: any) => {
     const { error } = await supabase.from('students').update(student).eq('id', student.id);
-    if (error) console.error('Error updating student in Supabase:', error);
+    if (error) {
+      console.error('Error updating student in Supabase:', error);
+      return { success: false, error };
+    }
+    return { success: true };
   };
 
   const deleteStudentFromSupabase = async (id: string) => {
@@ -271,28 +283,37 @@ export const Students: React.FC = () => {
       status: 'Active'
     };
 
+    let result;
     if (editingStudent) {
-      await updateStudentInSupabase(studentData);
+      result = await updateStudentInSupabase(studentData);
     } else {
-      await addStudentToSupabase(studentData);
+      result = await addStudentToSupabase(studentData);
       
-      // Automatic Fee Selection
-      const { data: feeGroup } = await supabase
-        .from('fee_groups')
-        .select('*')
-        .eq('course_id', formData.branch)
-        .limit(1)
-        .single();
-      
-      if (feeGroup) {
-        await supabase.from('fees').insert({
-          student_id: studentData.id,
-          amount: feeGroup.total_amount,
-          date: new Date().toISOString().split('T')[0],
-          status: 'PENDING',
-          description: `Enrollment Fee: ${feeGroup.name}`
-        });
+      if (result.success) {
+        // Automatic Fee Selection
+        const { data: feeGroup } = await supabase
+          .from('fee_groups')
+          .select('*')
+          .eq('course_id', formData.branch)
+          .limit(1)
+          .single();
+        
+        if (feeGroup) {
+          await supabase.from('fees').insert({
+            student_id: studentData.id,
+            amount: feeGroup.total_amount,
+            date: new Date().toISOString().split('T')[0],
+            status: 'PENDING',
+            description: `Enrollment Fee: ${feeGroup.name}`
+          });
+        }
       }
+    }
+
+    if (!result.success) {
+      setIsSubmitting(false);
+      alert(`Failed to save student: ${result.error?.message || 'Unknown error'}`);
+      return;
     }
 
     await fetchStudents();

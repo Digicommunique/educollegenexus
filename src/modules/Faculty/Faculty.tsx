@@ -87,7 +87,7 @@ export const Faculty: React.FC = () => {
 
   const fetchFaculty = async () => {
     const { data, error } = await supabase
-      .from('faculty')
+      .from('staff')
       .select('*')
       .order('created_at', { ascending: false });
 
@@ -115,7 +115,7 @@ export const Faculty: React.FC = () => {
   };
 
   const addFacultyToSupabase = async (faculty: FacultyMember) => {
-    const { error } = await supabase.from('faculty').insert([{
+    const { error } = await supabase.from('staff').insert([{
       id: faculty.id,
       name: faculty.name,
       email: faculty.email,
@@ -126,13 +126,18 @@ export const Faculty: React.FC = () => {
       staff_docs_url: (faculty as any).staffDocsUrl,
       nominee_docs_url: (faculty as any).nomineeDocsUrl,
       signature_url: (faculty as any).signatureUrl,
-      status: faculty.status
+      status: faculty.status,
+      role: 'FACULTY'
     }]);
-    if (error) console.error('Error adding faculty to Supabase:', error);
+    if (error) {
+      console.error('Error adding faculty to Supabase:', error);
+      return { success: false, error };
+    }
+    return { success: true };
   };
 
   const deleteFacultyFromSupabase = async (id: string) => {
-    const { error } = await supabase.from('faculty').delete().eq('id', id);
+    const { error } = await supabase.from('staff').delete().eq('id', id);
     if (error) console.error('Error deleting faculty from Supabase:', error);
   };
 
@@ -203,11 +208,15 @@ export const Faculty: React.FC = () => {
       signatureUrl: formData.signatureUrl,
     } as any;
 
-    await addFacultyToSupabase(newStaff);
-    const newList = [...facultyList, newStaff];
-    setFacultyList(newList);
-    localStorage.setItem('edu_nexus_faculty', JSON.stringify(newList));
-    
+    const result = await addFacultyToSupabase(newStaff);
+
+    if (!result.success) {
+      setIsSubmitting(false);
+      alert(`Failed to save staff: ${result.error?.message || 'Unknown error'}`);
+      return;
+    }
+
+    await fetchFaculty();
     setIsSubmitting(false);
     setShowSuccess(true);
     setTimeout(() => {

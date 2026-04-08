@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS staff (
   branch TEXT,
   designation TEXT,
   status TEXT DEFAULT 'Active',
+  photo_url TEXT,
+  staff_docs_url TEXT,
+  nominee_docs_url TEXT,
+  signature_url TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
