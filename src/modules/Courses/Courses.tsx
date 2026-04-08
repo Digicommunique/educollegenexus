@@ -445,11 +445,11 @@ export const Courses: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-2 p-1 bg-primary/5 rounded-2xl w-fit">
+      <div className="flex items-center gap-2 p-1 bg-primary/5 rounded-2xl w-full overflow-x-auto no-scrollbar">
         <button 
           onClick={() => setActiveTab('courses')}
           className={cn(
-            "px-8 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
+            "px-8 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap",
             activeTab === 'courses' ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-primary"
           )}
         >
@@ -459,7 +459,7 @@ export const Courses: React.FC = () => {
         <button 
           onClick={() => setActiveTab('timetable')}
           className={cn(
-            "px-8 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
+            "px-8 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap",
             activeTab === 'timetable' ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-primary"
           )}
         >
@@ -469,7 +469,7 @@ export const Courses: React.FC = () => {
         <button 
           onClick={() => setActiveTab('syllabus')}
           className={cn(
-            "px-8 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
+            "px-8 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap",
             activeTab === 'syllabus' ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-primary"
           )}
         >
@@ -479,7 +479,7 @@ export const Courses: React.FC = () => {
         <button 
           onClick={() => setActiveTab('studylog')}
           className={cn(
-            "px-8 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
+            "px-8 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap",
             activeTab === 'studylog' ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-primary"
           )}
         >

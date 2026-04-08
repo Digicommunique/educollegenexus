@@ -29,6 +29,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { exportToPDF, exportToExcel } from '../../lib/exportUtils';
 import { Download } from 'lucide-react';
 
+import { sendNotification, sendGlobalNotification } from '../../lib/notifications';
+
 const EXAMS = [
   { id: 'EX001', title: 'Mid-Term Physics', course: 'B.Tech CS', subject: 'Physics 101', date: '2026-10-15', time: '10:00 AM', duration: 120, status: 'UPCOMING', students: 120 },
   { id: 'EX002', title: 'Advanced Calculus', course: 'B.Tech IT', subject: 'Mathematics II', date: '2026-10-18', time: '02:00 PM', duration: 180, status: 'UPCOMING', students: 85 },
@@ -236,6 +238,13 @@ export const Exams: React.FC = () => {
       return;
     }
 
+    // Send global notification
+    await sendGlobalNotification(
+      'New Exam Scheduled',
+      `${newExam.title} for ${newExam.course} has been scheduled for ${formatDate(newExam.date)} at ${newExam.time}.`,
+      'INFO'
+    );
+
     await fetchExams();
     setIsSubmitting(false);
     setIsModalOpen(false);
@@ -385,6 +394,20 @@ export const Exams: React.FC = () => {
 
     await fetchExams();
     await fetchResults();
+
+    // Send notifications to students
+    const examResults = results.filter(r => r.examId === examId);
+    const exam = exams.find(e => e.id === examId);
+    
+    for (const res of examResults) {
+      await sendNotification(
+        res.student_id,
+        'Exam Results Published',
+        `Results for ${exam?.title || 'your exam'} have been published. Your score: ${res.marks}/${res.totalMarks}.`,
+        'SUCCESS'
+      );
+    }
+
     alert('Results published and notifications sent to Student and Parent panels!');
   };
 
@@ -429,19 +452,46 @@ export const Exams: React.FC = () => {
       </div>
 
       <div className="space-y-6">
-        {[1, 2, 3, 4, 5].map((q) => (
-          <div key={q} className="bg-white p-8 rounded-[32px] border border-primary/10 shadow-sm hover:border-primary/20 transition-all">
-            <h3 className="text-lg font-black text-slate-800 mb-6 flex gap-4">
-              <span className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-sm shrink-0">{q}</span>
-              What are the core principles of Object-Oriented Programming and how do they improve software design?
+        {selectedExam?.papers?.questions?.map((q: any, index: number) => (
+          <div key={q.id} className="bg-white p-8 rounded-[32px] border border-primary/10 shadow-sm hover:border-primary/20 transition-all">
+            <div className="flex items-center justify-between mb-4">
+              <span className="px-3 py-1 bg-slate-100 rounded-lg text-xs font-black text-slate-500">QUESTION {index + 1}</span>
+              <span className="text-xs font-bold text-primary bg-primary/5 px-2 py-1 rounded-lg">{q.marks} Marks</span>
+            </div>
+            
+            <h3 className="text-lg font-black text-slate-800 mb-6">
+              {q.text}
             </h3>
-            <textarea 
-              rows={6}
-              placeholder="Type your answer here..."
-              className="w-full px-6 py-4 bg-background border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none"
-            />
+
+            {q.diagramUrl && (
+              <div className="mb-6 rounded-2xl overflow-hidden border border-slate-100 max-w-2xl mx-auto">
+                <img src={q.diagramUrl} alt="Question Diagram" className="w-full h-auto" referrerPolicy="no-referrer" />
+              </div>
+            )}
+
+            {q.type === 'MCQ' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {q.options?.map((opt: string, optIdx: number) => (
+                  <label key={optIdx} className="flex items-center gap-3 p-4 bg-background rounded-2xl border border-transparent hover:border-primary/20 cursor-pointer transition-all group">
+                    <input type="radio" name={`q-${q.id}`} className="w-5 h-5 text-primary focus:ring-primary/20" />
+                    <span className="text-sm font-bold text-slate-600 group-hover:text-primary transition-colors">{opt}</span>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <textarea 
+                rows={q.type === 'LONG_ANSWER' ? 8 : 4}
+                placeholder="Type your answer here..."
+                className="w-full px-6 py-4 bg-background border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none"
+              />
+            )}
           </div>
         ))}
+        {(!selectedExam?.papers?.questions || selectedExam.papers.questions.length === 0) && (
+          <div className="bg-white p-12 rounded-[32px] border border-primary/10 text-center">
+            <p className="text-slate-500 font-bold">No questions found for this paper.</p>
+          </div>
+        )}
       </div>
 
       <div className="flex justify-end gap-4 pb-12">

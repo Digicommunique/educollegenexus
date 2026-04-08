@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
+import { supabase } from '../lib/supabase';
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => boolean;
+  login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
   isLoading: boolean;
 }
@@ -62,8 +63,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(false);
   }, []);
 
-  const login = (email: string, password: string): boolean => {
-    // Check for custom credentials from settings
+  const login = async (email: string, password: string): Promise<boolean> => {
+    // 1. Check Supabase user_credentials table
+    const { data: supabaseUser, error } = await supabase
+      .from('user_credentials')
+      .select('*')
+      .eq('id', email)
+      .eq('password', password)
+      .maybeSingle();
+
+    if (supabaseUser) {
+      const userObj: User = {
+        id: supabaseUser.id,
+        name: supabaseUser.name || supabaseUser.id,
+        email: supabaseUser.id,
+        role: supabaseUser.role as UserRole,
+        collegeId: 'c1'
+      };
+      setUser(userObj);
+      localStorage.setItem('edunexus_user', JSON.stringify(userObj));
+      return true;
+    }
+
+    // 2. Check for custom credentials from settings (Legacy/Fallback)
     const savedSettings = localStorage.getItem('edu_nexus_panel_credentials');
     if (savedSettings) {
       const customCreds = JSON.parse(savedSettings);
@@ -91,6 +113,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
+    // 3. Mock Users (Fallback)
     const mockData = MOCK_USERS[email];
     if (mockData && mockData.pass === password) {
       setUser(mockData.user);

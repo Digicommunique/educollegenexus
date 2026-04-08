@@ -279,9 +279,9 @@ export const Attendance: React.FC = () => {
       </AnimatePresence>
 
       {/* Filters & Search */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          <div>
+      <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="col-span-2 lg:col-span-1">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Select Date</label>
             <div className="relative">
               <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />

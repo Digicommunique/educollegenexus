@@ -15,7 +15,10 @@ import {
   ChevronUp,
   Copy,
   Edit2,
-  ChevronLeft
+  ChevronLeft,
+  Image as ImageIcon,
+  Upload,
+  X as CloseIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
@@ -32,6 +35,7 @@ interface Question {
   options?: string[];
   correctAnswer?: string;
   difficulty: 'EASY' | 'MEDIUM' | 'HARD';
+  diagramUrl?: string;
 }
 
 interface Paper {
@@ -491,6 +495,50 @@ export const PaperSetter: React.FC = () => {
                             placeholder="Enter the question here..."
                             className="w-full mt-1 px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none min-h-[100px]"
                           />
+                        </div>
+
+                        <div>
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Diagram / Image (Optional)</label>
+                          <div className="mt-1 flex items-center gap-4">
+                            {q.diagramUrl ? (
+                              <div className="relative w-32 h-32 rounded-xl overflow-hidden border border-slate-200">
+                                <img src={q.diagramUrl} alt="Diagram" className="w-full h-full object-cover" />
+                                <button 
+                                  onClick={() => updateQuestion(q.id, { diagramUrl: undefined })}
+                                  className="absolute top-1 right-1 p-1 bg-rose-500 text-white rounded-full shadow-lg"
+                                >
+                                  <CloseIcon className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div 
+                                onClick={() => {
+                                  const input = document.createElement('input');
+                                  input.type = 'file';
+                                  input.accept = 'image/*';
+                                  input.onchange = (e: any) => {
+                                    const file = e.target.files[0];
+                                    if (file) {
+                                      const reader = new FileReader();
+                                      reader.onload = (event) => {
+                                        updateQuestion(q.id, { diagramUrl: event.target?.result as string });
+                                      };
+                                      reader.readAsDataURL(file);
+                                    }
+                                  };
+                                  input.click();
+                                }}
+                                className="w-32 h-32 border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:border-indigo-500 hover:text-indigo-500 transition-all cursor-pointer bg-white"
+                              >
+                                <Upload className="w-6 h-6 mb-2" />
+                                <span className="text-[10px] font-bold">Upload Diagram</span>
+                              </div>
+                            )}
+                            <div className="flex-1 text-xs text-slate-500">
+                              <p>Add a diagram, chart, or any image related to this question.</p>
+                              <p className="mt-1">Supported formats: JPG, PNG, WEBP</p>
+                            </div>
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">

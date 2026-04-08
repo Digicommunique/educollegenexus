@@ -184,12 +184,12 @@ export const Dashboard: React.FC = () => {
   return (
     <div className="space-y-8">
       {/* Welcome Section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Welcome back, {user.name}!</h1>
-          <p className="text-slate-500">Here's what's happening at your college today.</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Welcome back, {user.name}!</h1>
+          <p className="text-slate-500 text-sm sm:text-base">Here's what's happening at your college today.</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {dbStatus && (
             <div className={cn(
               "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 border",
@@ -212,7 +212,7 @@ export const Dashboard: React.FC = () => {
       </div>
 
       {/* Role-Based Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
         {isStaff && (
           <>
             <QuickActionCard 
@@ -244,15 +244,21 @@ export const Dashboard: React.FC = () => {
         {isParent && (
           <>
             <QuickActionCard 
-              title="Pay Fees (QR)" 
-              icon={QrCode} 
+              title="Child Progress" 
+              icon={TrendingUp} 
+              color="bg-indigo-600" 
+              onClick={() => window.location.hash = '#/parents'} 
+            />
+            <QuickActionCard 
+              title="Make Payment" 
+              icon={CreditCard} 
               color="bg-emerald-600" 
-              onClick={() => setShowQRPayment(true)} 
+              onClick={() => window.location.hash = '#/fees'} 
             />
             <QuickActionCard 
               title="Check Attendance" 
               icon={UserCheck} 
-              color="bg-indigo-600" 
+              color="bg-blue-600" 
               onClick={() => window.location.hash = '#/attendance'} 
             />
             <QuickActionCard 
@@ -266,22 +272,28 @@ export const Dashboard: React.FC = () => {
         {isStudent && (
           <>
             <QuickActionCard 
-              title="Take Exam" 
-              icon={FileText} 
+              title="My Courses" 
+              icon={BookOpen} 
               color="bg-indigo-600" 
-              onClick={() => window.location.hash = '#/exams'} 
+              onClick={() => window.location.hash = '#/courses'} 
             />
             <QuickActionCard 
-              title="Study Log" 
-              icon={BookOpen} 
+              title="Pay Fees" 
+              icon={CreditCard} 
+              color="bg-emerald-600" 
+              onClick={() => window.location.hash = '#/fees'} 
+            />
+            <QuickActionCard 
+              title="Class Schedule" 
+              icon={Calendar} 
               color="bg-blue-600" 
               onClick={() => window.location.hash = '#/reports'} 
             />
             <QuickActionCard 
-              title="Timetable" 
-              icon={Calendar} 
+              title="Examinations" 
+              icon={FileText} 
               color="bg-amber-600" 
-              onClick={() => window.location.hash = '#/reports'} 
+              onClick={() => window.location.hash = '#/exams'} 
             />
           </>
         )}
@@ -326,7 +338,7 @@ export const Dashboard: React.FC = () => {
               <option>Last Year</option>
             </select>
           </div>
-          <div className="h-72 w-full">
+          <div className="h-64 sm:h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={enrollmentData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -356,8 +368,8 @@ export const Dashboard: React.FC = () => {
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
           <h3 className="font-bold text-slate-800 mb-6">{isStudent || isParent ? 'Attendance Overview' : 'Fee Distribution'}</h3>
           {isStudent || isParent ? (
-            <div className="flex flex-col items-center justify-center h-full pb-8">
-              <div className="relative w-48 h-48 flex items-center justify-center">
+            <div className="flex flex-col items-center justify-center h-full pb-8 pt-4">
+              <div className="relative w-40 h-40 sm:w-48 sm:h-48 flex items-center justify-center">
                 <svg className="w-full h-full transform -rotate-90">
                   <circle
                     cx="96"
@@ -566,10 +578,10 @@ const QuickActionCard: React.FC<QuickActionProps> = ({ title, icon: Icon, color,
     onClick={onClick}
     className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-100 transition-all flex items-center gap-4 group text-left"
   >
-    <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center text-white transition-transform group-hover:scale-110", color)}>
-      <Icon className="w-5 h-5" />
+    <div className={cn("w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center text-white transition-transform group-hover:scale-110", color)}>
+      <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
     </div>
-    <span className="font-bold text-slate-700">{title}</span>
+    <span className="font-bold text-slate-700 text-xs sm:text-sm">{title}</span>
   </button>
 );
 

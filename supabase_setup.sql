@@ -43,6 +43,23 @@ CREATE TABLE IF NOT EXISTS staff (
   designation TEXT,
   status TEXT DEFAULT 'Active',
   photo_url TEXT,
+  address TEXT,
+  state TEXT,
+  pincode TEXT,
+  blood_group TEXT,
+  religion TEXT,
+  caste TEXT,
+  category TEXT,
+  father_name TEXT,
+  father_occupation TEXT,
+  mother_name TEXT,
+  mother_occupation TEXT,
+  parent_phone TEXT,
+  parent_email TEXT,
+  emergency_name TEXT,
+  emergency_phone TEXT,
+  emergency_address TEXT,
+  allergies TEXT,
   staff_docs_url TEXT,
   nominee_docs_url TEXT,
   signature_url TEXT,
@@ -200,8 +217,14 @@ CREATE TABLE IF NOT EXISTS fees (
   student_id TEXT REFERENCES students(id) ON DELETE CASCADE,
   amount NUMERIC NOT NULL,
   date DATE NOT NULL,
+  due_date DATE,
   status TEXT NOT NULL, -- 'Paid', 'Pending', 'Overdue'
   payment_method TEXT,
+  payment_mode TEXT,
+  transaction_id TEXT,
+  fine NUMERIC DEFAULT 0,
+  discount NUMERIC DEFAULT 0,
+  discount_reason TEXT,
   description TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -360,6 +383,32 @@ ALTER TABLE semesters ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE branches ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS user_credentials (
+  id TEXT PRIMARY KEY, -- This will be the username/ID
+  password TEXT NOT NULL,
+  role TEXT NOT NULL,
+  name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id TEXT NOT NULL, -- Target user ID (or 'ALL')
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  type TEXT DEFAULT 'INFO', -- INFO, SUCCESS, WARNING, ERROR
+  is_read BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable RLS
+ALTER TABLE user_credentials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+
+-- Policy
+CREATE POLICY "Allow all access" ON user_credentials FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all access" ON notifications FOR ALL USING (true) WITH CHECK (true);
 
 -- Create secure policies (Allow all access for development)
 -- This ensures the mock authentication works with Supabase.

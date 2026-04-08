@@ -29,8 +29,11 @@ import { supabase } from '../../lib/supabase';
 import { motion, AnimatePresence } from 'motion/react';
 import { exportToPDF, exportToExcel } from '../../lib/exportUtils';
 
+import { sendNotification } from '../../lib/notifications';
+
 interface FeeTransaction {
   id: string;
+  studentId: string;
   student: string;
   roll: string;
   amount: number;
@@ -64,12 +67,18 @@ export const Fees: React.FC = () => {
   const [transactions, setTransactions] = useState<FeeTransaction[]>([]);
   const [feeGroups, setFeeGroups] = useState<FeeGroup[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [courseFilter, setCourseFilter] = useState('All');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [editingTxn, setEditingTxn] = useState<FeeTransaction | null>(null);
   const [editingGroup, setEditingGroup] = useState<FeeGroup | null>(null);
   
+  const [studentSearchQuery, setStudentSearchQuery] = useState('');
+  const [studentCourseFilter, setStudentCourseFilter] = useState('All');
+
   const [form, setForm] = useState<Partial<FeeTransaction>>({
     status: 'PENDING',
     paymentMode: 'CASH',
@@ -90,9 +99,15 @@ export const Fees: React.FC = () => {
       await fetchCourses();
       await fetchFeeGroups();
       await fetchTransactions();
+      await fetchStudents();
     };
     init();
   }, []);
+
+  const fetchStudents = async () => {
+    const { data } = await supabase.from('students').select('id, name, roll_no, phone, parent_phone, branch');
+    if (data) setStudents(data);
+  };
 
   const fetchCourses = async () => {
     const { data } = await supabase.from('courses').select('*');
@@ -128,6 +143,7 @@ export const Fees: React.FC = () => {
         const studentCourse = courses.find(c => c.id === t.students?.branch);
         return {
           id: t.id,
+          studentId: t.student_id,
           student: t.students?.name || 'Unknown',
           roll: t.students?.roll_no || 'N/A',
           amount: t.amount,
@@ -155,13 +171,28 @@ export const Fees: React.FC = () => {
       status: form.status || 'PENDING',
       payment_method: form.paymentMode || 'CASH',
       description: form.type || 'Tuition Fee',
-      student_id: form.roll // Assuming roll is used as student ID for now or lookup needed
+      student_id: form.studentId // Use studentId instead of roll
     };
+
+    if (!txnData.student_id) {
+      alert('Please select a valid student by roll number');
+      return;
+    }
 
     if (editingTxn) {
       await supabase.from('fees').update(txnData).eq('id', editingTxn.id);
     } else {
       await supabase.from('fees').insert(txnData);
+      
+      // Send notification to student
+      if (txnData.status === 'PAID') {
+        await sendNotification(
+          txnData.student_id,
+          'Fee Payment Received',
+          `Your payment of ${formatCurrency(txnData.amount)} for ${txnData.description} has been received successfully.`,
+          'SUCCESS'
+        );
+      }
     }
     
     await fetchTransactions();
@@ -211,32 +242,53 @@ export const Fees: React.FC = () => {
 
   const handleRollChange = async (roll: string) => {
     setForm({ ...form, roll });
-    if (roll.length > 2) {
-      const { data: student } = await supabase
-        .from('students')
-        .select('*, courses(*)')
-        .eq('roll_no', roll)
+    const student = students.find(s => s.roll_no === roll);
+    
+    if (student) {
+      // Find fee group for this student's branch/course
+      const { data: group } = await supabase
+        .from('fee_groups')
+        .select('*, fee_group_items(*)')
+        .eq('course_id', student.branch)
+        .limit(1)
         .single();
-      
-      if (student) {
-        // Find fee group for this student's branch/course
-        const { data: group } = await supabase
-          .from('fee_groups')
-          .select('*, fee_group_items(*)')
-          .eq('course_id', student.branch) // Assuming branch matches course ID or name
-          .limit(1)
-          .single();
 
-        setForm(prev => ({
-          ...prev,
-          student: student.name,
-          phone: student.phone,
-          parentPhone: student.parent_phone || student.phone,
-          feeGroup: group?.name || student.branch,
-          amount: group?.total_amount || 0,
-          type: group?.fee_group_items?.[0]?.name || 'Tuition Fee'
-        }));
-      }
+      setForm(prev => ({
+        ...prev,
+        studentId: student.id,
+        student: student.name,
+        phone: student.phone,
+        parentPhone: student.parent_phone || student.phone,
+        feeGroup: group?.name || student.branch,
+        amount: group?.total_amount || 0,
+        type: group?.fee_group_items?.[0]?.name || 'Tuition Fee'
+      }));
+    } else {
+      setForm(prev => ({ ...prev, studentId: '', student: '', amount: 0 }));
+    }
+  };
+
+  const handleStudentSelect = async (studentId: string) => {
+    const student = students.find(s => s.id === studentId);
+    if (student) {
+      const { data: group } = await supabase
+        .from('fee_groups')
+        .select('*, fee_group_items(*)')
+        .eq('course_id', student.branch)
+        .limit(1)
+        .single();
+
+      setForm(prev => ({
+        ...prev,
+        studentId: student.id,
+        student: student.name,
+        roll: student.roll_no,
+        phone: student.phone,
+        parentPhone: student.parent_phone || student.phone,
+        feeGroup: group?.name || student.branch,
+        amount: group?.total_amount || 0,
+        type: group?.fee_group_items?.[0]?.name || 'Tuition Fee'
+      }));
     }
   };
 
@@ -454,11 +506,16 @@ export const Fees: React.FC = () => {
     exportToExcel(transactions, 'Fee_Report');
   };
 
-  const filteredTransactions = transactions.filter(txn => 
-    txn.student.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    txn.roll.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    txn.id.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredTransactions = transactions.filter(txn => {
+    const matchesSearch = txn.student.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      txn.roll.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      txn.id.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesStatus = statusFilter === 'All' || txn.status === statusFilter;
+    const matchesCourse = courseFilter === 'All' || txn.feeGroup === courseFilter;
+
+    return matchesSearch && matchesStatus && matchesCourse;
+  });
 
   return (
     <div className="space-y-8">
@@ -490,6 +547,8 @@ export const Fees: React.FC = () => {
               onClick={() => {
                 setEditingTxn(null);
                 setForm({ status: 'PENDING', paymentMode: 'CASH', frequency: 'MONTHLY', fine: 0, discount: 0 });
+                setStudentSearchQuery('');
+                setStudentCourseFilter('All');
                 setIsModalOpen(true);
               }}
               className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-bold hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
@@ -525,16 +584,16 @@ export const Fees: React.FC = () => {
           <Receipt className="w-4 h-4" />
           Transactions
         </button>
-        <button
-          onClick={() => setActiveTab('groups')}
-          className={cn(
-            "flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all",
-            activeTab === 'groups' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
-          )}
-        >
-          <Wallet className="w-4 h-4" />
-          Fee Groups
-        </button>
+          <button
+            onClick={() => setActiveTab('groups')}
+            className={cn(
+              "flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all",
+              activeTab === 'groups' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            <Wallet className="w-4 h-4" />
+            Fee Structure
+          </button>
       </div>
 
       {activeTab === 'transactions' ? (
@@ -573,9 +632,9 @@ export const Fees: React.FC = () => {
       </div>
 
       {/* Filters & Search */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-4 flex-1">
-          <div className="relative flex-1 max-w-md">
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row items-center gap-4 flex-1">
+          <div className="relative w-full sm:max-w-md">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input 
               type="text" 
@@ -585,10 +644,28 @@ export const Fees: React.FC = () => {
               className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 outline-none"
             />
           </div>
-          <button className="flex items-center gap-2 px-4 py-2 bg-slate-50 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-100 transition-colors">
-            <Filter className="w-4 h-4" />
-            Filters
-          </button>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <select 
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="flex-1 sm:flex-none px-4 py-2 bg-slate-50 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="All">All Status</option>
+              <option value="PAID">Paid</option>
+              <option value="PENDING">Pending</option>
+              <option value="OVERDUE">Overdue</option>
+            </select>
+            <select 
+              value={courseFilter}
+              onChange={(e) => setCourseFilter(e.target.value)}
+              className="flex-1 sm:flex-none px-4 py-2 bg-slate-50 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="All">All Courses</option>
+              {courses.map(c => (
+                <option key={c.id} value={c.name}>{c.name}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -676,6 +753,8 @@ export const Fees: React.FC = () => {
                         onClick={() => {
                           setEditingTxn(txn);
                           setForm(txn);
+                          setStudentSearchQuery('');
+                          setStudentCourseFilter('All');
                           setIsModalOpen(true);
                         }}
                         className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-colors"
@@ -727,6 +806,7 @@ export const Fees: React.FC = () => {
                 </div>
               </div>
               <h3 className="text-lg font-black text-slate-800 mb-1">{group.name}</h3>
+              <p className="text-xs font-bold text-indigo-600 mb-2">{courses.find(c => c.id === group.course_id)?.name || 'General'}</p>
               <p className="text-sm text-slate-500 mb-4">{group.description}</p>
               
               <div className="space-y-2 mb-6">
@@ -776,23 +856,73 @@ export const Fees: React.FC = () => {
                 </button>
               </div>
               <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Student Name</label>
-                    <input 
-                      type="text" 
-                      value={form.student || ''}
-                      onChange={(e) => setForm({...form, student: e.target.value})}
-                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                    />
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-4">
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <div className="flex-1 space-y-2">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Search Student</label>
+                      <div className="relative">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input 
+                          type="text"
+                          placeholder="Search by name or roll no..."
+                          value={studentSearchQuery}
+                          onChange={(e) => setStudentSearchQuery(e.target.value)}
+                          className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Filter by Course</label>
+                      <select 
+                        value={studentCourseFilter}
+                        onChange={(e) => setStudentCourseFilter(e.target.value)}
+                        className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                      >
+                        <option value="All">All Courses</option>
+                        {courses.map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Student Result</label>
+                    <select 
+                      value={form.studentId || ''}
+                      onChange={(e) => handleStudentSelect(e.target.value)}
+                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    >
+                      <option value="">Choose Student</option>
+                      {students
+                        .filter(s => {
+                          const matchesSearch = s.name.toLowerCase().includes(studentSearchQuery.toLowerCase()) || 
+                                               s.roll_no.toLowerCase().includes(studentSearchQuery.toLowerCase());
+                          const matchesCourse = studentCourseFilter === 'All' || s.branch === studentCourseFilter;
+                          return matchesSearch && matchesCourse;
+                        })
+                        .map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} | {s.roll_no} | {courses.find(c => c.id === s.branch)?.name || 'No Course'}
+                          </option>
+                        ))
+                      }
+                    </select>
+                    {studentSearchQuery && students.filter(s => s.name.toLowerCase().includes(studentSearchQuery.toLowerCase()) || s.roll_no.toLowerCase().includes(studentSearchQuery.toLowerCase())).length === 0 && (
+                      <p className="text-[10px] text-rose-500 font-bold">No students found matching your search.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Roll No</label>
                     <input 
                       type="text" 
                       value={form.roll || ''}
-                      onChange={(e) => handleRollChange(e.target.value)}
-                      className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                      readOnly
+                      placeholder="Auto-filled"
+                      className="w-full px-4 py-3 bg-slate-100 border-none rounded-xl text-sm font-bold outline-none"
                     />
                   </div>
                   <div className="space-y-2">

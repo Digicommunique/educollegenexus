@@ -114,19 +114,36 @@ export const Faculty: React.FC = () => {
     }
   };
 
-  const addFacultyToSupabase = async (faculty: FacultyMember) => {
+  const addFacultyToSupabase = async (formData: any, generatedId: string) => {
     const { error } = await supabase.from('staff').insert([{
-      id: faculty.id,
-      name: faculty.name,
-      email: faculty.email,
-      phone: faculty.phone,
-      branch: faculty.branch,
-      designation: faculty.designation,
-      photo_url: (faculty as any).photoUrl,
-      staff_docs_url: (faculty as any).staffDocsUrl,
-      nominee_docs_url: (faculty as any).nomineeDocsUrl,
-      signature_url: (faculty as any).signatureUrl,
-      status: faculty.status,
+      id: generatedId,
+      name: `${formData.title} ${formData.firstName} ${formData.surname}`,
+      email: formData.email,
+      phone: formData.phone,
+      branch: formData.branch,
+      designation: 'Staff',
+      status: 'Active',
+      photo_url: formData.photoUrl,
+      address: formData.address,
+      state: formData.state,
+      pincode: formData.pincode,
+      blood_group: formData.bloodGroup,
+      religion: formData.religion,
+      caste: formData.caste,
+      category: formData.category,
+      father_name: formData.fatherName,
+      father_occupation: formData.fatherOccupation,
+      mother_name: formData.motherName,
+      mother_occupation: formData.motherOccupation,
+      parent_phone: formData.parentPhone,
+      parent_email: formData.parentEmail,
+      emergency_name: formData.emergencyName,
+      emergency_phone: formData.emergencyPhone,
+      emergency_address: formData.emergencyAddress,
+      allergies: formData.allergy,
+      staff_docs_url: formData.staffDocsUrl,
+      nominee_docs_url: formData.nomineeDocsUrl,
+      signature_url: formData.signatureUrl,
       role: 'FACULTY'
     }]);
     if (error) {
@@ -194,21 +211,7 @@ export const Faculty: React.FC = () => {
     e.preventDefault();
     setIsSubmitting(true);
     
-    const newStaff: FacultyMember = {
-      id: generatedId,
-      name: `${formData.title} ${formData.firstName} ${formData.surname}`,
-      email: formData.email,
-      phone: formData.phone,
-      branch: formData.branch,
-      designation: 'Staff', // Default
-      status: 'Active',
-      photoUrl: formData.photoUrl,
-      staffDocsUrl: formData.staffDocsUrl,
-      nomineeDocsUrl: formData.nomineeDocsUrl,
-      signatureUrl: formData.signatureUrl,
-    } as any;
-
-    const result = await addFacultyToSupabase(newStaff);
+    const result = await addFacultyToSupabase(formData, generatedId);
 
     if (!result.success) {
       setIsSubmitting(false);
@@ -391,7 +394,7 @@ export const Faculty: React.FC = () => {
                 <h3 className="text-xl font-bold text-primary">Staff Personal Information</h3>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Title</label>
                   <select 
@@ -444,7 +447,7 @@ export const Faculty: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Staff ID (Auto)</label>
                   <input 
@@ -494,7 +497,7 @@ export const Faculty: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Phone Number</label>
                   <div className="relative">
@@ -546,7 +549,7 @@ export const Faculty: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Religion</label>
                   <select 
@@ -592,7 +595,7 @@ export const Faculty: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="md:col-span-2 space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Residential Address</label>
                   <div className="relative">
@@ -689,7 +692,7 @@ export const Faculty: React.FC = () => {
                 <h3 className="text-xl font-bold text-primary">Family Details</h3>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <div className="space-y-6">
                   <h4 className="text-sm font-bold text-primary flex items-center gap-2">
                     <div className="w-1.5 h-1.5 bg-primary rounded-full"></div>
@@ -755,7 +758,7 @@ export const Faculty: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Parent's Contact Number</label>
                   <div className="relative">
