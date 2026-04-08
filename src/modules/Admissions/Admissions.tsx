@@ -116,9 +116,13 @@ export const Admissions: React.FC = () => {
       setIsModalOpen(false);
       setEditingApp(null);
       setForm({});
-    } catch (err) {
+    } catch (err: any) {
       console.error('Unexpected error in handleSave:', err);
-      alert('An unexpected error occurred. Please check the console for details.');
+      if (err.message === 'Failed to fetch') {
+        alert('Connection Error: Failed to fetch. This usually means your Supabase URL is incorrect or the database is unreachable. Please check your Settings.');
+      } else {
+        alert(`An unexpected error occurred: ${err.message || 'Unknown error'}`);
+      }
     }
   };
 
