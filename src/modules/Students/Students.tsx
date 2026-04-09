@@ -38,6 +38,8 @@ interface Student {
   name: string;
   email: string;
   phone: string;
+  courseId: string;
+  courseName?: string;
   branch: string;
   batch: string;
   year: string;
@@ -59,6 +61,7 @@ interface Student {
   emergencyAddress?: string;
   allergy?: string;
   status: 'Active' | 'Inactive';
+  photoUrl?: string;
 }
 
 export const Students: React.FC = () => {
@@ -121,7 +124,7 @@ export const Students: React.FC = () => {
       if (saved) setStudents(JSON.parse(saved));
     } else if (data) {
       const formattedStudents: Student[] = data.map(s => {
-        const studentCourse = courses.find(c => c.id === s.branch);
+        const studentCourse = courses.find(c => c.id === s.course_id);
         return {
           id: s.id,
           rollNumber: s.roll_no || '',
@@ -132,7 +135,9 @@ export const Students: React.FC = () => {
           name: s.name,
           email: s.email || '',
           phone: s.phone || '',
-          branch: studentCourse?.name || s.branch || '',
+          courseId: s.course_id || '',
+          courseName: studentCourse?.name || '',
+          branch: s.branch || '',
           batch: s.batch || '',
           year: s.year || '',
           bloodGroup: s.blood_group,
@@ -199,6 +204,7 @@ export const Students: React.FC = () => {
     middleName: '',
     surname: '',
     rollNumber: '', // Added rollNumber
+    course: '',
     branch: '',
     batch: '',
     year: '',
@@ -256,6 +262,7 @@ export const Students: React.FC = () => {
       name: `${formData.firstName} ${formData.surname}`,
       email: formData.email,
       phone: formData.phone,
+      course_id: formData.course,
       branch: formData.branch,
       batch: formData.batch,
       year: formData.year,
@@ -294,7 +301,7 @@ export const Students: React.FC = () => {
         const { data: feeGroup } = await supabase
           .from('fee_groups')
           .select('*')
-          .eq('course_id', formData.branch)
+          .eq('course_id', formData.course)
           .limit(1)
           .single();
         
@@ -370,6 +377,7 @@ export const Students: React.FC = () => {
       middleName: student.middleName || '',
       surname: student.surname || '',
       rollNumber: student.rollNumber || '',
+      course: student.courseId || '',
       branch: student.branch || '',
       batch: student.batch || '',
       year: student.year || '',
@@ -527,7 +535,7 @@ export const Students: React.FC = () => {
                       </td>
                       <td className="px-6 py-4">
                         <div>
-                          <p className="text-sm font-bold text-slate-700">{student.branch}</p>
+                          <p className="text-sm font-bold text-slate-700">{student.courseName || student.branch}</p>
                           <p className="text-xs text-slate-500">{student.year} • {student.batch}</p>
                         </div>
                       </td>
@@ -658,6 +666,21 @@ export const Students: React.FC = () => {
                     placeholder="Enter roll number"
                     className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
                   />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Course</label>
+                  <select 
+                    name="course"
+                    required
+                    value={formData.course}
+                    onChange={handleInputChange}
+                    className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                  >
+                    <option value="">Select Course</option>
+                    {courses.map((c: any) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Branch</label>

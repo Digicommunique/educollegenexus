@@ -48,7 +48,7 @@ interface FeeTransaction {
   fine: number;
   discount: number;
   discountReason: string;
-  paymentMode: 'CASH' | 'UPI' | 'CARD';
+  paymentMode: string;
   transactionId?: string;
   installments?: { amount: number; date: string; status: 'PAID' | 'PENDING' }[];
 }
@@ -68,6 +68,7 @@ export const Fees: React.FC = () => {
   const [feeGroups, setFeeGroups] = useState<FeeGroup[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
+  const [paymentSchemes, setPaymentSchemes] = useState<string[]>(['Cash', 'UPI', 'Card', 'Cheque', 'DD']);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [courseFilter, setCourseFilter] = useState('All');
@@ -81,7 +82,7 @@ export const Fees: React.FC = () => {
 
   const [form, setForm] = useState<Partial<FeeTransaction>>({
     status: 'PENDING',
-    paymentMode: 'CASH',
+    paymentMode: 'Cash',
     frequency: 'MONTHLY',
     fine: 0,
     discount: 0
@@ -100,9 +101,20 @@ export const Fees: React.FC = () => {
       await fetchFeeGroups();
       await fetchTransactions();
       await fetchStudents();
+      await fetchPaymentSchemes();
     };
     init();
   }, []);
+
+  const fetchPaymentSchemes = async () => {
+    const { data, error } = await supabase.from('app_settings').select('*').eq('key', 'fees').single();
+    if (data && data.value && data.value.paymentSchemes) {
+      setPaymentSchemes(data.value.paymentSchemes);
+      if (!editingTxn) {
+        setForm(prev => ({ ...prev, paymentMode: data.value.paymentSchemes[0] }));
+      }
+    }
+  };
 
   const fetchStudents = async () => {
     const { data } = await supabase.from('students').select('id, name, roll_no, phone, parent_phone, branch');
@@ -158,7 +170,7 @@ export const Fees: React.FC = () => {
           fine: 0,
           discount: 0,
           discountReason: '',
-          paymentMode: (t.payment_method as any) || 'CASH'
+          paymentMode: (t.payment_method as any) || paymentSchemes[0] || 'Cash'
         };
       }));
     }
@@ -169,7 +181,7 @@ export const Fees: React.FC = () => {
       amount: Number(form.amount) || 0,
       date: form.date || new Date().toISOString().split('T')[0],
       status: form.status || 'PENDING',
-      payment_method: form.paymentMode || 'CASH',
+      payment_method: form.paymentMode || paymentSchemes[0] || 'Cash',
       description: form.type || 'Tuition Fee',
       student_id: form.studentId // Use studentId instead of roll
     };
@@ -198,7 +210,7 @@ export const Fees: React.FC = () => {
     await fetchTransactions();
     setIsModalOpen(false);
     setEditingTxn(null);
-    setForm({ status: 'PENDING', paymentMode: 'CASH', frequency: 'MONTHLY', fine: 0, discount: 0 });
+    setForm({ status: 'PENDING', paymentMode: paymentSchemes[0] || 'Cash', frequency: 'MONTHLY', fine: 0, discount: 0 });
   };
 
   const handleSaveGroup = async () => {
@@ -274,7 +286,7 @@ export const Fees: React.FC = () => {
       const { data: group } = await supabase
         .from('fee_groups')
         .select('*, fee_group_items(*)')
-        .eq('course_id', student.branch)
+        .eq('course_id', student.course_id || student.branch)
         .limit(1)
         .single();
 
@@ -285,7 +297,7 @@ export const Fees: React.FC = () => {
         roll: student.roll_no,
         phone: student.phone,
         parentPhone: student.parent_phone || student.phone,
-        feeGroup: group?.name || student.branch,
+        feeGroup: group?.name || courses.find(c => c.id === (student.course_id || student.branch))?.name || student.branch,
         amount: group?.total_amount || 0,
         type: group?.fee_group_items?.[0]?.name || 'Tuition Fee'
       }));
@@ -546,7 +558,7 @@ export const Fees: React.FC = () => {
             <button 
               onClick={() => {
                 setEditingTxn(null);
-                setForm({ status: 'PENDING', paymentMode: 'CASH', frequency: 'MONTHLY', fine: 0, discount: 0 });
+                setForm({ status: 'PENDING', paymentMode: paymentSchemes[0] || 'Cash', frequency: 'MONTHLY', fine: 0, discount: 0 });
                 setStudentSearchQuery('');
                 setStudentCourseFilter('All');
                 setIsModalOpen(true);
@@ -898,12 +910,12 @@ export const Fees: React.FC = () => {
                         .filter(s => {
                           const matchesSearch = s.name.toLowerCase().includes(studentSearchQuery.toLowerCase()) || 
                                                s.roll_no.toLowerCase().includes(studentSearchQuery.toLowerCase());
-                          const matchesCourse = studentCourseFilter === 'All' || s.branch === studentCourseFilter;
+                          const matchesCourse = studentCourseFilter === 'All' || (s.course_id || s.branch) === studentCourseFilter;
                           return matchesSearch && matchesCourse;
                         })
                         .map(s => (
                           <option key={s.id} value={s.id}>
-                            {s.name} | {s.roll_no} | {courses.find(c => c.id === s.branch)?.name || 'No Course'}
+                            {s.name} | {s.roll_no} | {courses.find(c => c.id === (s.course_id || s.branch))?.name || 'No Course'}
                           </option>
                         ))
                       }
@@ -1013,16 +1025,16 @@ export const Fees: React.FC = () => {
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Payment Mode</label>
                     <select 
-                      value={form.paymentMode || 'CASH'}
-                      onChange={(e) => setForm({...form, paymentMode: e.target.value as any})}
+                      value={form.paymentMode || paymentSchemes[0] || 'Cash'}
+                      onChange={(e) => setForm({...form, paymentMode: e.target.value})}
                       className="w-full px-4 py-3 bg-background border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
                     >
-                      <option value="CASH">Cash</option>
-                      <option value="UPI">UPI</option>
-                      <option value="CARD">Card</option>
+                      {paymentSchemes.map(scheme => (
+                        <option key={scheme} value={scheme}>{scheme}</option>
+                      ))}
                     </select>
                   </div>
-                  {form.paymentMode !== 'CASH' && (
+                  {form.paymentMode?.toUpperCase() !== 'CASH' && (
                     <div className="space-y-2">
                       <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Transaction ID</label>
                       <input 

@@ -34,7 +34,7 @@ interface AttendanceRecord {
   student_id: string;
   name: string;
   roll: string;
-  status: 'PRESENT' | 'ABSENT' | 'LATE';
+  status: 'PRESENT' | 'ABSENT' | 'LATE' | 'INVALID_ENTRY';
   time?: string;
   ip?: string;
   location?: string;
@@ -125,7 +125,7 @@ export const Attendance: React.FC = () => {
     localStorage.setItem('attendance_settings', JSON.stringify(settings));
   }, [settings]);
 
-  const handleStatusChange = async (studentId: string, status: 'PRESENT' | 'ABSENT' | 'LATE') => {
+  const handleStatusChange = async (studentId: string, status: 'PRESENT' | 'ABSENT' | 'LATE' | 'INVALID_ENTRY') => {
     try {
       const existingRecord = attendanceData.find(a => a.student_id === studentId && !a.id.startsWith('temp-'));
       const student = students.find(s => s.id === studentId);
@@ -462,6 +462,15 @@ export const Attendance: React.FC = () => {
                         )}
                       >
                         Absent
+                      </button>
+                      <button 
+                        onClick={() => handleStatusChange(student.id, 'INVALID_ENTRY')}
+                        className={cn(
+                          "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all",
+                          student.status === 'INVALID_ENTRY' ? "bg-rose-100 text-rose-600 shadow-sm" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                        )}
+                      >
+                        Invalid
                       </button>
                     </div>
                   </td>

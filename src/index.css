@@ -5,12 +5,12 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Outfit", sans-serif;
 
-  --color-primary: #065F46;
-  --color-secondary: #10B981;
+  --color-primary: #991B1B;
+  --color-secondary: #DC2626;
   --color-accent: #F59E0B;
-  --color-background: #F0FDF4;
+  --color-background: #FEF2F2;
   --color-surface: #FFFFFF;
-  --color-text-main: #064E3B;
+  --color-text-main: #7F1D1D;
 }
 
 @layer base {

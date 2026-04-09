@@ -72,6 +72,7 @@ interface TimeTableSlot {
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const TIME_SLOTS = [
+  '07:00 AM - 08:20 AM',
   '09:00 AM - 10:00 AM',
   '10:00 AM - 11:00 AM',
   '11:00 AM - 12:00 PM',

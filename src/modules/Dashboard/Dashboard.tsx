@@ -56,6 +56,8 @@ export const Dashboard: React.FC = () => {
   const [attendancePercent, setAttendancePercent] = useState(0);
   const [dbStatus, setDbStatus] = useState<{ connected: boolean; message: string } | null>(null);
 
+  const [showTroubleshooting, setShowTroubleshooting] = useState(false);
+
   useEffect(() => {
     if (user) {
       checkConnection();
@@ -183,6 +185,94 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-8">
+      {/* Troubleshooting Modal */}
+      <AnimatePresence>
+        {showTroubleshooting && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-[32px] shadow-2xl w-full max-w-2xl overflow-hidden"
+            >
+              <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-red-50">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-red-600 shadow-sm">
+                    <AlertCircle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-black text-slate-900">Database Connection Issue</h2>
+                    <p className="text-red-600/80 text-sm font-bold uppercase tracking-wider">Troubleshooting Guide</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowTroubleshooting(false)}
+                  className="p-2 hover:bg-white rounded-xl transition-colors"
+                >
+                  <X className="w-6 h-6 text-slate-400" />
+                </button>
+              </div>
+              
+              <div className="p-8 space-y-8 max-h-[60vh] overflow-y-auto">
+                <div className="space-y-4">
+                  <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                    <div className="w-6 h-6 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center text-xs">1</div>
+                    Environment Variables
+                  </h3>
+                  <p className="text-slate-600 text-sm leading-relaxed">
+                    When deploying to <span className="font-bold text-slate-900">Vercel</span> or <span className="font-bold text-slate-900">Netlify</span>, you must manually add your Supabase credentials in the project settings.
+                  </p>
+                  <div className="bg-slate-50 p-4 rounded-2xl space-y-2 font-mono text-xs">
+                    <p className="text-slate-400"># Add these to your deployment settings:</p>
+                    <p><span className="text-indigo-600">VITE_SUPABASE_URL</span>=your_supabase_project_url</p>
+                    <p><span className="text-indigo-600">VITE_SUPABASE_ANON_KEY</span>=your_supabase_anon_key</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                    <div className="w-6 h-6 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center text-xs">2</div>
+                    Supabase Project Status
+                  </h3>
+                  <p className="text-slate-600 text-sm leading-relaxed">
+                    Ensure your Supabase project is active and not paused. Log in to the <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" className="text-indigo-600 font-bold hover:underline">Supabase Dashboard</a> to check.
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                    <div className="w-6 h-6 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center text-xs">3</div>
+                    Database Schema
+                  </h3>
+                  <p className="text-slate-600 text-sm leading-relaxed">
+                    If you've connected but see errors, you may need to run the initial SQL setup. Copy the contents of <span className="font-bold text-slate-900">supabase_setup.sql</span> and run it in the Supabase SQL Editor.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl flex gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                  <p className="text-xs text-amber-800 font-medium leading-relaxed">
+                    <span className="font-bold">Error Message:</span> {dbStatus?.message || 'Unknown error'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-8 bg-slate-50 flex items-center justify-end gap-3">
+                <button 
+                  onClick={() => {
+                    checkConnection();
+                    fetchDashboardData();
+                  }}
+                  className="px-8 py-3 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                >
+                  Retry Connection
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Welcome Section */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div>
@@ -191,13 +281,18 @@ export const Dashboard: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {dbStatus && (
-            <div className={cn(
-              "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 border",
-              dbStatus.connected ? "bg-green-50 text-green-600 border-green-100" : "bg-red-50 text-red-600 border-red-100"
-            )}>
+            <button 
+              onClick={() => !dbStatus.connected && setShowTroubleshooting(true)}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 border transition-all",
+                dbStatus.connected 
+                  ? "bg-green-50 text-green-600 border-green-100 cursor-default" 
+                  : "bg-red-50 text-red-600 border-red-100 hover:bg-red-100 cursor-pointer"
+              )}
+            >
               <div className={cn("w-2 h-2 rounded-full animate-pulse", dbStatus.connected ? "bg-green-500" : "bg-red-500")} />
-              {dbStatus.connected ? "DB Connected" : "DB Disconnected"}
-            </div>
+              {dbStatus.connected ? "DB Connected" : "DB Disconnected - Click to Fix"}
+            </button>
           )}
           <div className="px-4 py-2 bg-white border border-slate-200 rounded-xl flex items-center gap-2 shadow-sm">
             <Calendar className="w-4 h-4 text-slate-400" />

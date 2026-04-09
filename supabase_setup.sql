@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS students (
   name TEXT NOT NULL,
   email TEXT,
   phone TEXT,
+  course_id TEXT REFERENCES courses(id) ON DELETE SET NULL,
   branch TEXT,
   batch TEXT,
   year TEXT,
